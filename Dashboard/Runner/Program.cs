@@ -10,6 +10,10 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Newtonsoft.Json;
+using LiteDB;
+using Simulation.Models;
+using System.IO;
+using System.Threading;
 using Orleans;
 using Orleans.Configuration;
 using Orleans.Dashboard;
@@ -80,10 +84,11 @@ namespace Runner
     }
   }
 
-  public class Strategy(IClusterClient connector, IConfiguration configuration)
+  public class Strategy(IClusterClient connector, IConfiguration configuration, IHostApplicationLifetime lifetime)
   {
     protected virtual IClusterClient Connector { get; set; } = connector;
     protected virtual IConfiguration Configuration { get; set; } = configuration;
+    protected virtual IHostApplicationLifetime Lifetime { get; set; } = lifetime;
 
     /// <summary>
     /// Primary gateway
@@ -96,6 +101,10 @@ namespace Runner
     int PosDirection { get; set; }
     int Direction { get; set; }
     long? Stamp;
+    long endTime;
+    long lastTickUtc;
+    long lastPriceTime;
+    int finalized;
 
     const string symName = "ES";
 
@@ -122,22 +131,60 @@ namespace Runner
       SpanMin = new() { TimeFrame = TimeSpan.FromMinutes(1) };
       SpanHour = new() { TimeFrame = TimeSpan.FromHours(1) };
 
+      // End of available tick history (timestamps are unix-ns): finalize when reached.
+      // Queried up-front; the sim opens the file afterwards.
+      using (var storage = new LiteDatabase(Path.Combine(((SimGateway)adapter).Source, "ES.db")))
+      {
+        endTime = storage.GetCollection<Summary>("prices").Query()
+          .OrderByDescending(o => o.Id).FirstOrDefault()?.Time ?? 0;
+      }
+
       adapter.OnInstrument = async instrument =>
       {
         Stamp ??= instrument.Price.Time.Value;
+        Interlocked.Exchange(ref lastTickUtc, DateTime.UtcNow.Ticks);
+        Interlocked.Exchange(ref lastPriceTime, instrument.Price.Time.Value);
 
-        // Stop execution and analyze metrics 
-
-        if (instrument.Price.Time - Stamp > TimeSpan.FromDays(15).Ticks)
+        // End of history: print metrics and shut down
+        if (endTime > 0 && instrument.Price.Time >= endTime)
         {
-          var metrics = await GetMetrics(Adapter);
-          Console.WriteLine(JsonConvert.SerializeObject(metrics, Formatting.Indented));
-          await Adapter.Disconnect();
+          await FinalizeAsync();
           return;
         }
 
         await OnTick(instrument);
       };
+
+      // Watchdog: if ticks stop arriving (stream exhausted without hitting endTime),
+      // finalize after 10 minutes of silence, but only near the end of history
+      // (skips the daily maintenance breaks). Armed after the first tick.
+      _ = Task.Run(async () =>
+      {
+        const long nsPerHour = 3_600_000_000_000L;
+        while (Volatile.Read(ref finalized) == 0)
+        {
+          await Task.Delay(TimeSpan.FromSeconds(30));
+          var silentFor = DateTime.UtcNow - new DateTime(Interlocked.Read(ref lastTickUtc));
+          var nearEnd = Interlocked.Read(ref lastPriceTime) >= endTime - 2 * nsPerHour;
+          if (Stamp is not null && silentFor > TimeSpan.FromMinutes(10) && nearEnd)
+          {
+            await FinalizeAsync();
+          }
+        }
+      });
+    }
+
+    async Task FinalizeAsync()
+    {
+      if (Interlocked.Exchange(ref finalized, 1) != 0) return;
+
+      var metrics = await GetMetrics(Adapter);
+
+      Console.WriteLine(JsonConvert.SerializeObject(metrics, Formatting.Indented));
+      Console.Out.Flush();
+
+      await Adapter.Disconnect();
+      Lifetime.StopApplication();
     }
 
     public async Task OnTick(Instrument instrument)
