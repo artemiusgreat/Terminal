@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Newtonsoft.Json;
 using Orleans;
 using Orleans.Configuration;
 using Orleans.Dashboard;
@@ -121,27 +122,34 @@ namespace Runner
       SpanMin = new() { TimeFrame = TimeSpan.FromMinutes(1) };
       SpanHour = new() { TimeFrame = TimeSpan.FromHours(1) };
 
-      adapter.OnInstrument = OnTick;
+      adapter.OnInstrument = async instrument =>
+      {
+        Stamp ??= instrument.Price.Time.Value;
+
+        // Stop execution and analyze metrics 
+
+        if (instrument.Price.Time - Stamp > TimeSpan.FromDays(1).Ticks)
+        {
+          var metrics = await GetMetrics(Adapter);
+          var ratios = metrics["Ratios"].ToDictionary(o => o.Name, o => o.Value);
+          var losses = metrics["Losses"].ToDictionary(o => o.Name, o => o.Value);
+          var wins = metrics["Wins"].ToDictionary(o => o.Name, o => o.Value);
+          var sharpe = ratios["Sharpe"];
+          var averageWin = wins["Average $"];
+          var averageLoss = losses["Average $"];
+
+          Console.WriteLine(JsonConvert.SerializeObject(metrics, Formatting.Indented));
+
+          await Adapter.Disconnect();
+          return;
+        }
+
+        await OnTick(instrument);
+      };
     }
 
     public async Task OnTick(Instrument instrument)
     {
-      Stamp ??= instrument.Price.Time.Value;
-
-      if (instrument.Price.Time - Stamp > TimeSpan.FromDays(15).Ticks)
-      {
-        var metrics = await GetMetrics(Adapter);
-        var ratios = metrics["Ratios"].ToDictionary(o => o.Name, o => o.Value);
-        var losses = metrics["Losses"].ToDictionary(o => o.Name, o => o.Value);
-        var wins = metrics["Wins"].ToDictionary(o => o.Name, o => o.Value);
-        var sharpe = ratios["Sharpe"];
-        var averageWin = wins["Average $"];
-        var averageLoss = losses["Average $"];
-
-        await Adapter.Disconnect();
-        return;
-      }
-
       var price = instrument.Price;
       var index = price.Time.Value;
       var adapter = Adapter;
