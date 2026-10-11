@@ -100,10 +100,7 @@ namespace Runner
     TimeGroup SpanHour { get; set; }
     int PosDirection { get; set; }
     int Direction { get; set; }
-    long? Stamp;
     long endTime;
-    long lastTickUtc;
-    long lastPriceTime;
     int finalized;
 
     const string symName = "ES";
@@ -141,37 +138,22 @@ namespace Runner
 
       adapter.OnInstrument = async instrument =>
       {
-        Stamp ??= instrument.Price.Time.Value;
-        Interlocked.Exchange(ref lastTickUtc, DateTime.UtcNow.Ticks);
-        Interlocked.Exchange(ref lastPriceTime, instrument.Price.Time.Value);
-
-        // End of history: print metrics and shut down
-        if (endTime > 0 && instrument.Price.Time >= endTime)
-        {
-          await FinalizeAsync();
-          return;
-        }
-
         await OnTick(instrument);
       };
 
-      // Watchdog: if ticks stop arriving (stream exhausted without hitting endTime),
-      // finalize after 10 minutes of silence, but only near the end of history
-      // (skips the daily maintenance breaks). Armed after the first tick.
-      _ = Task.Run(async () =>
+      // End of history: the final summaries carry no price updates, so the last
+      // record arrives here (its order time equals endTime). Shut down from a
+      // separate thread: StopApplication must not run on the grain callback thread.
+      adapter.OnDomOrder = order =>
       {
-        const long nsPerHour = 3_600_000_000_000L;
-        while (Volatile.Read(ref finalized) == 0)
+        if (endTime > 0 && order.Time >= endTime)
         {
-          await Task.Delay(TimeSpan.FromSeconds(30));
-          var silentFor = DateTime.UtcNow - new DateTime(Interlocked.Read(ref lastTickUtc));
-          var nearEnd = Interlocked.Read(ref lastPriceTime) >= endTime - 2 * nsPerHour;
-          if (Stamp is not null && silentFor > TimeSpan.FromMinutes(10) && nearEnd)
-          {
-            await FinalizeAsync();
-          }
+          _ = Task.Run(() => FinalizeAsync());
         }
-      });
+
+        return Task.CompletedTask;
+      };
+
     }
 
     async Task FinalizeAsync()
