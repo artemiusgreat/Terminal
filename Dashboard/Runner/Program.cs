@@ -102,6 +102,15 @@ namespace Runner
     int Direction { get; set; }
     long endTime;
     int finalized;
+    // Mean-reversion: 2-sigma Bollinger fade. Grid-optimal region W=60m, SL=20t, TP=10t.
+    const long MrWindowNs = 60L * 60 * 1000000000L;
+    const double MrSlTicks = 20, MrTpTicks = 10, MrTickSize = 0.25;
+    readonly Queue<(long t, double m)> mrWindow = new();
+    double mrSum, mrSumSq;
+    double mrPrevMid = double.NaN, mrPrevLo = double.NaN, mrPrevHi = double.NaN;
+    bool mrHaveBand;
+    int mrPos;
+    double mrEntry;
 
     const string symName = "ES";
 
@@ -172,51 +181,61 @@ namespace Runner
     public async Task OnTick(Instrument instrument)
     {
       var price = instrument.Price;
-      var index = price.Time.Value;
       var adapter = Adapter;
-      var account = adapter.Account;
-      var asset = account.Instruments[symName];
-      var orders = (await adapter.GetOrders(default)).Data;
-      var positions = (await adapter.GetPositions(default)).Data;
+      var bid = price.Bid ?? double.NaN;
+      var ask = price.Ask ?? double.NaN;
+      if (double.IsNaN(bid) || double.IsNaN(ask)) return;
+      if ((ask - bid) / MrTickSize > 3) return; // skip insane quotes (see tick study)
+      var mid = (bid + ask) / 2;
+      var t = price.Time.Value;
 
-      var spanDay = SpanDay.Update(price);
-      var spanMin = SpanMin.Update(price);
-      var spanHour = SpanHour.Update(price);
-
-      var isMinLong = spanMin.Bar.Close > spanMin.Bar.Open;
-      var isMinShort = spanMin.Bar.Close < spanMin.Bar.Open;
-      var isDayLong = spanDay.Bar.Close > spanDay.Bar.Open;
-      var isDayShort = spanDay.Bar.Close < spanDay.Bar.Open;
-      var isHourLong = spanHour.Bar.Close > spanHour.Bar.Open;
-      var isHourShort = spanHour.Bar.Close < spanHour.Bar.Open;
-      var isLong = isMinLong && isHourLong && isDayLong;
-      var isShort = isMinShort && isHourShort && isDayShort;
-
-      if (positions.Count is 0)
+      mrWindow.Enqueue((t, mid)); mrSum += mid; mrSumSq += mid * mid;
+      while (mrWindow.Count > 0 && mrWindow.Peek().t < t - MrWindowNs)
       {
-        switch (true)
-        {
-          case true when isLong:
-            PosDirection = 1;
-            await OpenPosition(adapter, Instruments[symName], OrderSideEnum.Long);
-            break;
-
-          case true when isShort:
-            PosDirection = -1;
-            await OpenPosition(adapter, Instruments[symName], OrderSideEnum.Short);
-            break;
-        }
+        var o = mrWindow.Dequeue(); mrSum -= o.m; mrSumSq -= o.m * o.m;
       }
 
-      if (positions.Count is not 0)
+      if (mrWindow.Count >= 120)
       {
-        var closeLong = PosDirection > 0 && isHourShort;
-        var closeShort = PosDirection < 0 && isHourLong;
+        var n = (double)mrWindow.Count;
+        var mean = mrSum / n;
+        var variance = mrSumSq / n - mean * mean;
+        if (variance < 0) variance = 0;
+        var sd = Math.Sqrt(variance);
+        var lo = mean - 2 * sd;
+        var hi = mean + 2 * sd;
 
-        if (closeLong || closeShort)
+        if (mrPos == 0 && mrHaveBand)
         {
-          await ClosePosition(adapter);
+          if (mrPrevMid >= mrPrevLo && mid < lo)
+          {
+            mrPos = 1; mrEntry = ask;
+            await OpenPosition(adapter, Instruments[symName], OrderSideEnum.Long);
+          }
+          else if (mrPrevMid <= mrPrevHi && mid > hi)
+          {
+            mrPos = -1; mrEntry = bid;
+            await OpenPosition(adapter, Instruments[symName], OrderSideEnum.Short);
+          }
         }
+        else if (mrPos == 1)
+        {
+          if (bid <= mrEntry - MrSlTicks * MrTickSize || bid >= mrEntry + MrTpTicks * MrTickSize)
+          {
+            mrPos = 0;
+            await ClosePosition(adapter);
+          }
+        }
+        else if (mrPos == -1)
+        {
+          if (ask >= mrEntry + MrSlTicks * MrTickSize || ask <= mrEntry - MrTpTicks * MrTickSize)
+          {
+            mrPos = 0;
+            await ClosePosition(adapter);
+          }
+        }
+
+        mrPrevMid = mid; mrPrevLo = lo; mrPrevHi = hi; mrHaveBand = true;
       }
     }
 
