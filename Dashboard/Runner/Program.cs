@@ -128,18 +128,10 @@ namespace Runner
 
         // Stop execution and analyze metrics 
 
-        if (instrument.Price.Time - Stamp > TimeSpan.FromDays(1).Ticks)
+        if (instrument.Price.Time - Stamp > TimeSpan.FromDays(15).Ticks)
         {
           var metrics = await GetMetrics(Adapter);
-          var ratios = metrics["Ratios"].ToDictionary(o => o.Name, o => o.Value);
-          var losses = metrics["Losses"].ToDictionary(o => o.Name, o => o.Value);
-          var wins = metrics["Wins"].ToDictionary(o => o.Name, o => o.Value);
-          var sharpe = ratios["Sharpe"];
-          var averageWin = wins["Average $"];
-          var averageLoss = losses["Average $"];
-
           Console.WriteLine(JsonConvert.SerializeObject(metrics, Formatting.Indented));
-
           await Adapter.Disconnect();
           return;
         }
