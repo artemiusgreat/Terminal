@@ -172,6 +172,11 @@ namespace Runner
       var metrics = await GetMetrics(Adapter);
 
       Console.WriteLine(JsonConvert.SerializeObject(metrics, Formatting.Indented));
+
+      var transactions = await GetTransactionLog(Adapter);
+
+      Console.WriteLine("TRANSACTIONS");
+      Console.WriteLine(JsonConvert.SerializeObject(transactions, Formatting.Indented));
       Console.Out.Flush();
 
       await Adapter.Disconnect();
@@ -370,6 +375,30 @@ namespace Runner
       }
 
       return response;
+    }
+
+    /// <summary>
+    /// Completed transactions ordered by close time
+    /// </summary>
+    /// <param name="adapters"></param>
+    public virtual async Task<IList<object>> GetTransactionLog(params IGateway[] adapters)
+    {
+      var actionResponses = await Task.WhenAll(adapters.Select(o => o.GetTransactions(default)));
+      return actionResponses
+        .SelectMany(o => o.Data)
+        .Where(o => o?.Operation?.Time is not null)
+        .OrderBy(o => o.Operation.Time)
+        .Select(o => (object)new
+        {
+          Time = new DateTime(o.Operation.Time.Value),
+          Side = o.Side?.ToString(),
+          Amount = o.Operation.Amount,
+          EntryPrice = o.Operation.AveragePrice,
+          ExitPrice = o.Operation.Price,
+          Profit = o.Balance.Current,
+          Commission = o.Operation.Instrument?.Commission
+        })
+        .ToList();
     }
 
     /// <summary>
