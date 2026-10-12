@@ -105,6 +105,8 @@ namespace Runner
     // Mean-reversion: 2-sigma Bollinger fade. Grid-optimal region W=60m, SL=20t, TP=10t.
     const long MrWindowNs = 60L * 60 * 1000000000L;
     const double MrSlTicks = 20, MrTpTicks = 10, MrTickSize = 0.25;
+    // Night session only (ET): entries 18:00 -> 09:30, flat through 16:00-18:00 halt.
+    static readonly TimeZoneInfo EtZone = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
     readonly Queue<(long t, double m)> mrWindow = new();
     double mrSum, mrSumSq;
     double mrPrevMid = double.NaN, mrPrevLo = double.NaN, mrPrevHi = double.NaN;
@@ -193,6 +195,9 @@ namespace Runner
       if ((ask - bid) / MrTickSize > 3) return; // skip insane quotes (see tick study)
       var mid = (bid + ask) / 2;
       var t = price.Time.Value;
+      var etSod = TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(t / 1000000L), EtZone).TimeOfDay.TotalSeconds;
+      var mrNight = etSod >= 18 * 3600 || etSod < 9.5 * 3600; // entries 18:00 -> 09:30 ET
+      var mrHalt = etSod >= 16 * 3600 && etSod < 18 * 3600;   // 16:00-18:00 ET clearing halt
 
       mrWindow.Enqueue((t, mid)); mrSum += mid; mrSumSq += mid * mid;
       while (mrWindow.Count > 0 && mrWindow.Peek().t < t - MrWindowNs)
@@ -210,7 +215,7 @@ namespace Runner
         var lo = mean - 2 * sd;
         var hi = mean + 2 * sd;
 
-        if (mrPos == 0 && mrHaveBand)
+        if (mrPos == 0 && mrHaveBand && mrNight)
         {
           if (mrPrevMid >= mrPrevLo && mid < lo)
           {
@@ -225,7 +230,12 @@ namespace Runner
         }
         else if (mrPos == 1)
         {
-          if (bid <= mrEntry - MrSlTicks * MrTickSize || bid >= mrEntry + MrTpTicks * MrTickSize)
+          if (mrHalt)
+          {
+            mrPos = 0;
+            await ClosePosition(adapter);
+          }
+          else if (bid <= mrEntry - MrSlTicks * MrTickSize || bid >= mrEntry + MrTpTicks * MrTickSize)
           {
             mrPos = 0;
             await ClosePosition(adapter);
@@ -233,7 +243,12 @@ namespace Runner
         }
         else if (mrPos == -1)
         {
-          if (ask >= mrEntry + MrSlTicks * MrTickSize || ask <= mrEntry - MrTpTicks * MrTickSize)
+          if (mrHalt)
+          {
+            mrPos = 0;
+            await ClosePosition(adapter);
+          }
+          else if (ask >= mrEntry + MrSlTicks * MrTickSize || ask <= mrEntry - MrTpTicks * MrTickSize)
           {
             mrPos = 0;
             await ClosePosition(adapter);
