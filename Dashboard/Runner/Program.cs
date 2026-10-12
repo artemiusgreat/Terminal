@@ -49,7 +49,7 @@ namespace Runner
         orleans.AddMemoryGrainStorageAsDefault();
         orleans.AddMemoryStreams<DefaultMemoryMessageBodySerializer>(nameof(Message));
         orleans.AddMemoryGrainStorage("PubSubStore");
-        orleans.AddDashboard();
+        // orleans.AddDashboard(); // disabled for backtest: headless run, dashboard is pure overhead
         orleans.Configure<GrainCollectionOptions>(options =>
         {
           options.CollectionAge = TimeSpan.FromDays(100);

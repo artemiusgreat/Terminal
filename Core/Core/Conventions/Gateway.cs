@@ -3,6 +3,7 @@ using Core.Grains;
 using Core.Models;
 using Orleans;
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -24,6 +25,12 @@ namespace Core.Conventions
     /// </summary>
     /// <param name="order"></param>
     Task StreamDomOrder(DomOrder order);
+
+    /// <summary>
+    /// Batched DOM order messages (backtest throughput)
+    /// </summary>
+    /// <param name="orders"></param>
+    Task StreamDomOrders(IList<DomOrder> orders);
 
     /// <summary>
     /// Price message
@@ -196,6 +203,18 @@ namespace Core.Conventions
     /// </summary>
     /// <param name="order"></param>
     public virtual Task StreamDomOrder(DomOrder order) => OnDomOrder(order);
+
+    /// <summary>
+    /// Batched DOM order messages (backtest throughput)
+    /// </summary>
+    /// <param name="orders"></param>
+    public virtual async Task StreamDomOrders(IList<DomOrder> orders)
+    {
+      foreach (var order in orders)
+      {
+        await OnDomOrder(order);
+      }
+    }
 
     /// <summary>
     /// Price message

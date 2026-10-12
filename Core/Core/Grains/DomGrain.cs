@@ -35,6 +35,7 @@ namespace Core.Grains
     /// </summary>
     /// <param name="order"></param>
     Task<DomOrderResponse> SendOrder(DomOrder order);
+    Task<StatusResponse> SendOrders(IList<DomOrder> orders);
 
     /// <summary>
     /// Remove order from the book
@@ -151,6 +152,23 @@ namespace Core.Grains
       return new()
       {
         Data = order
+      };
+    }
+
+    /// <summary>
+    /// Update DOM with a batch of orders (backtest throughput: one grain call per batch)
+    /// </summary>
+    /// <param name="orders"></param>
+    public virtual async Task<StatusResponse> SendOrders(IList<DomOrder> orders)
+    {
+      foreach (var order in orders)
+      {
+        await SendOrder(order);
+      }
+
+      return new()
+      {
+        Data = StatusEnum.Active
       };
     }
 

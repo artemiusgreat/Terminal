@@ -38,6 +38,11 @@ namespace Core.Grains
   public class InstrumentGrain : Grain<Prices>, IInstrumentGrain
   {
     /// <summary>
+    /// Maximum price history retained in State.Items (oldest trimmed). Override to cap.
+    /// </summary>
+    protected virtual int MaxPriceHistory => int.MaxValue;
+
+    /// <summary>
     /// Observer
     /// </summary>
     protected ITradeObserver observer;
@@ -91,6 +96,10 @@ namespace Core.Grains
       var price = Combine(currentPrice, nextPrice);
 
       State.Items.Add(price);
+      if (State.Items.Count > MaxPriceHistory)
+      {
+        State.Items.RemoveRange(0, State.Items.Count - MaxPriceHistory);
+      }
       State = State with { Instrument = instrument with { Price = price } };
 
       return Task.FromResult(new InstrumentResponse

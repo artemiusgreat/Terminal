@@ -80,6 +80,11 @@ namespace Simulation.Grains
     /// <param name="instrument"></param>
     public virtual async Task<StatusResponse> Tap(Instrument instrument)
     {
+      if (State.Count == 0)
+      {
+        return new() { Data = StatusEnum.Active };
+      }
+
       var orders = State.Values.ToArray();
 
       foreach (var order in orders)

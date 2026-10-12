@@ -13,6 +13,11 @@ namespace Simulation.Grains
   public class SimInstrumentGrain : InstrumentGrain, ISimInstrumentGrain
   {
     /// <summary>
+    /// Backtest replay never reads price history (only the latest price); cap to bound memory.
+    /// </summary>
+    protected override int MaxPriceHistory => 10000;
+
+    /// <summary>
     /// List of prices by criteria
     /// </summary>
     /// <param name="criteria"></param>
