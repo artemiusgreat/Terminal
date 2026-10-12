@@ -55,11 +55,6 @@ namespace Simulation.Grains
     /// <param name="instrument"></param>
     public virtual async Task<StatusResponse> Tap(Instrument instrument)
     {
-      if (State.Count == 0)
-      {
-        return new StatusResponse { Data = StatusEnum.Active };
-      }
-
       foreach (var name in State.Keys)
       {
         if (Equals(name, instrument.Name))

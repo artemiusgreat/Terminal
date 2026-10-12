@@ -33,10 +33,6 @@ namespace Simulation.Grains
     protected Connection state;
     protected CancellationTokenSource cts;
     protected PriorityQueue<SimStream, long> queue = new();
-    // Batched order pipeline (backtest throughput): accumulates orders across Process() calls,
-    // flushed as one grain call + one observer call per batch (or at trade/Dom/Options boundaries).
-    protected readonly List<DomOrder> batch = new();
-    protected const int BatchSize = 100;
     protected ConcurrentDictionary<string, SimStream> docs = new();
     protected ConcurrentDictionary<string, SimStream> streams = new();
 
@@ -145,21 +141,14 @@ namespace Simulation.Grains
 
         if (summaryOrder is not null)
         {
-          batch.Add(summaryOrder);
-        }
+          var orderResponse = await domGrain.SendOrder(summaryOrder);
+          summaryOrder = orderResponse.Data;
 
-        var isTrade = summaryOrder?.Action is DomAction.Trade;
-
-        // Flush the batch before anything that observes book state in order:
-        // trades, full-book snapshots, options, price updates, or a full batch.
-        var hasOptions = summary.Options is not null && summary.Options.Count > 0;
-        var flush = isTrade || batch.Count >= BatchSize || summary.Dom is not null || hasOptions || summaryInstrument is not null;
-
-        if (flush && batch.Count > 0)
-        {
-          await domGrain.SendOrders(batch);
-          await observer.StreamDomOrders(batch);
-          batch.Clear();
+          if (summaryOrder.Action is DomAction.Trade)
+          {
+            var instrumentResponse = await domGrain.Trade(summaryOrder);
+            summaryInstrument = instrumentResponse.Data;
+          }
         }
 
         if (summary.Dom is not null)
@@ -167,15 +156,9 @@ namespace Simulation.Grains
           await domGrain.Store(summary.Dom);
         }
 
-        if (hasOptions)
+        if (summary.Options is not null)
         {
           await optionsGrain.Store(summary.Options);
-        }
-
-        if (isTrade)
-        {
-          var instrumentResponse = await domGrain.Trade(summaryOrder);
-          summaryInstrument = instrumentResponse.Data;
         }
 
         if (summaryInstrument is not null)
@@ -200,19 +183,11 @@ namespace Simulation.Grains
           await observer.StreamInstrument(group);
         }
 
+        await observer.StreamDomOrder(summaryOrder);
+
         if (stream.MoveNext())
         {
           queue.Enqueue(stream, stream.Current.Time);
-        }
-        else
-        {
-          // End of stream: flush any remaining batched orders.
-          if (batch.Count > 0)
-          {
-            await domGrain.SendOrders(batch);
-            await observer.StreamDomOrders(batch);
-            batch.Clear();
-          }
         }
       }
       catch (Exception e)
