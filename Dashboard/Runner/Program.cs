@@ -272,12 +272,12 @@ namespace Runner
 
         if (mrPos == 0 && mrHaveBand && mrNight)
         {
-          if (mrPrevMid >= mrPrevLo && mid < lo)
+          if (mid < lo)
           {
             mrPos = 1; mrEntry = ask;
             await OpenPosition(adapter, Instruments[symName], OrderSideEnum.Long, ouContracts);
           }
-          else if (mrPrevMid <= mrPrevHi && mid > hi)
+          else if (mid > hi)
           {
             mrPos = -1; mrEntry = bid;
             await OpenPosition(adapter, Instruments[symName], OrderSideEnum.Short, ouContracts);
