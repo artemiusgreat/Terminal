@@ -49,7 +49,7 @@ namespace Runner
         orleans.AddMemoryGrainStorageAsDefault();
         orleans.AddMemoryStreams<DefaultMemoryMessageBodySerializer>(nameof(Message));
         orleans.AddMemoryGrainStorage("PubSubStore");
-        orleans.AddDashboard();
+        // orleans.AddDashboard(); // disabled: headless backtest, dashboard is pure overhead
         orleans.Configure<GrainCollectionOptions>(options =>
         {
           options.CollectionAge = TimeSpan.FromDays(100);
@@ -113,6 +113,18 @@ namespace Runner
     bool mrHaveBand;
     int mrPos;
     double mrEntry;
+    // OU-derived entry/sizing: 1-min bars -> OU fit every 15 min -> OptimalEntryDistance + Kelly.
+    readonly List<(double tSeconds, double x)> ouBars = new();
+    long ouLastBarMin = -1;
+    double ouBarSum;
+    int ouBarN;
+    long ouLastRefitNs;
+    double ouMu = double.NaN;
+    double ouEntryDist;
+    double ouContracts = 1;
+    const double OuBankroll = 100_000;
+    const int OuMaxContracts = 10;
+    const long OuRefitNs = 15L * 60 * 1000000000L;
 
     const string symName = "ES";
 
@@ -205,6 +217,48 @@ namespace Runner
         var o = mrWindow.Dequeue(); mrSum -= o.m; mrSumSq -= o.m * o.m;
       }
 
+      // OU 1-min bars
+      var barMin = t / 60000000000L;
+      if (barMin != ouLastBarMin)
+      {
+        if (ouLastBarMin >= 0 && ouBarN > 0)
+        {
+          ouBars.Add((ouLastBarMin * 60.0, ouBarSum / ouBarN));
+          if (ouBars.Count > 60) ouBars.RemoveAt(0);
+        }
+        ouLastBarMin = barMin; ouBarSum = mid; ouBarN = 1;
+      }
+      else { ouBarSum += mid; ouBarN++; }
+
+      // OU refit every 15 min
+      if (t - ouLastRefitNs >= OuRefitNs && ouBars.Count >= 60)
+      {
+        ouLastRefitNs = t;
+        try
+        {
+          var op = OrnsteinUhlenbeck.Fit(ouBars);
+          var tpPts = MrTpTicks * MrTickSize;
+          var slPts = MrSlTicks * MrTickSize;
+          var costPts = MrTickSize + 2 * (3.65 / 12.50 * MrTickSize);
+          var ed = OrnsteinUhlenbeck.OptimalEntryDistance(op, tpPts, slPts, costPts);
+          if (ed > 0)
+          {
+            var prevMu = ouMu;
+            ouMu = op.Mu;
+            ouEntryDist = ed;
+            var entryPx = op.Mu - ed;
+            var winP = OrnsteinUhlenbeck.HitProbability(op, entryPx, entryPx + tpPts, entryPx - slPts);
+            var avgWin = MrTpTicks * 12.50 - 2 * 3.65;
+            var avgLoss = MrSlTicks * 12.50 + 2 * 3.65;
+            var kelly = OrnsteinUhlenbeck.KellyFraction(winP, avgWin, avgLoss) / 2;
+            var riskPer = MrSlTicks * 12.50;
+            ouContracts = Math.Max(1, Math.Min(OuMaxContracts, (int)(kelly * OuBankroll / riskPer)));
+            if (double.IsNaN(prevMu)) { mrHaveBand = false; }
+          }
+        }
+        catch { }
+      }
+
       if (mrWindow.Count >= 120)
       {
         var n = (double)mrWindow.Count;
@@ -212,20 +266,21 @@ namespace Runner
         var variance = mrSumSq / n - mean * mean;
         if (variance < 0) variance = 0;
         var sd = Math.Sqrt(variance);
-        var lo = mean - 2 * sd;
-        var hi = mean + 2 * sd;
+        var useOu = !double.IsNaN(ouMu) && ouEntryDist > 0;
+        var lo = useOu ? ouMu - ouEntryDist : mean - 2 * sd;
+        var hi = useOu ? ouMu + ouEntryDist : mean + 2 * sd;
 
         if (mrPos == 0 && mrHaveBand && mrNight)
         {
           if (mrPrevMid >= mrPrevLo && mid < lo)
           {
             mrPos = 1; mrEntry = ask;
-            await OpenPosition(adapter, Instruments[symName], OrderSideEnum.Long);
+            await OpenPosition(adapter, Instruments[symName], OrderSideEnum.Long, ouContracts);
           }
           else if (mrPrevMid <= mrPrevHi && mid > hi)
           {
             mrPos = -1; mrEntry = bid;
-            await OpenPosition(adapter, Instruments[symName], OrderSideEnum.Short);
+            await OpenPosition(adapter, Instruments[symName], OrderSideEnum.Short, ouContracts);
           }
         }
         else if (mrPos == 1)
