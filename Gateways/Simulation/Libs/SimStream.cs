@@ -34,9 +34,7 @@ namespace Simulation
       storage = new LiteDatabase(source);
       enumerator = storage
         .GetCollection<Summary>("prices")
-        .Query()
-        .OrderBy(o => o.Id)
-        .ToEnumerable()
+        .FindAll()
         .GetEnumerator();
     }
 
