@@ -79,7 +79,7 @@ namespace Simulation
     /// <param name="criteria"></param>
     public override Task<PricesResponse> GetPrices(PriceCriteria criteria)
     {
-      return Component<ISimInstrumentGrain>(criteria.Instrument.Name).Prices(criteria);
+      return Component<IInstrumentGrain>(criteria.Instrument.Name).Prices(criteria);
     }
 
     /// <summary>
@@ -88,7 +88,7 @@ namespace Simulation
     /// <param name="criteria"></param>
     public override Task<PricesResponse> GetPriceGroups(PriceCriteria criteria)
     {
-      return Component<ISimInstrumentGrain>(criteria.Instrument.Name).PriceGroups(criteria);
+      return Component<IInstrumentGrain>(criteria.Instrument.Name).PriceGroups(criteria);
     }
 
     /// <summary>

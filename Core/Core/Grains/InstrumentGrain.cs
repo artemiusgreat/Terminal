@@ -3,7 +3,6 @@ using Core.Models;
 using Orleans;
 using Orleans.Streams;
 using System;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -35,7 +34,7 @@ namespace Core.Grains
     Task<PricesResponse> PriceGroups(PriceCriteria criteria);
   }
 
-  public class InstrumentGrain : Grain<Prices>, IInstrumentGrain
+  public class InstrumentGrain : Grain<Instrument>, IInstrumentGrain
   {
     /// <summary>
     /// Observer
@@ -63,7 +62,7 @@ namespace Core.Grains
     /// <summary>
     /// Get instrument
     /// </summary>
-    public virtual Task<Instrument> Instrument() => Task.FromResult(State.Instrument);
+    public virtual Task<Instrument> Instrument() => Task.FromResult(State);
 
     /// <summary>
     /// List of prices by criteria
@@ -71,7 +70,7 @@ namespace Core.Grains
     /// <param name="criteria"></param>
     public virtual Task<PricesResponse> Prices(PriceCriteria criteria) => Task.FromResult(new PricesResponse
     {
-      Data = [.. State.Items]
+      Data = State.Price is null ? [] : [State.Price]
     });
 
     /// <summary>
@@ -87,15 +86,17 @@ namespace Core.Grains
     public virtual Task<InstrumentResponse> Send(Instrument instrument)
     {
       var nextPrice = instrument.Price;
-      var currentPrice = State.Items.LastOrDefault() ?? new Price();
+      var currentPrice = State.Price ?? new Price();
       var price = Combine(currentPrice, nextPrice);
 
-      State.Items.Add(price);
-      State = State with { Instrument = instrument with { Price = price } };
+      State = instrument with
+      {
+        Price = price
+      };
 
       return Task.FromResult(new InstrumentResponse
       {
-        Data = State.Instrument
+        Data = State
       });
     }
 

@@ -32,6 +32,12 @@ namespace Simulation.Grains
   {
     protected Connection state;
     protected CancellationTokenSource cts;
+    protected string descriptor;
+    protected IDomGrain domGrain;
+    protected IOptionsGrain optionsGrain;
+    protected ISimOrdersGrain ordersGrain;
+    protected ISimPositionsGrain positionsGrain;
+    protected IInstrumentGrain instrumentGrain;
     protected PriorityQueue<SimStream, long> queue = new();
     protected ConcurrentDictionary<string, SimStream> docs = new();
     protected ConcurrentDictionary<string, SimStream> streams = new();
@@ -43,11 +49,13 @@ namespace Simulation.Grains
     /// <param name="grainObserver"></param>
     public virtual async Task<StatusResponse> Setup(Connection connection, ITradeObserver grainObserver)
     {
-      var descriptor = this.GetDescriptor();
+      descriptor = this.GetDescriptor();
 
       state = connection;
       observer = grainObserver;
       cts = new CancellationTokenSource();
+      ordersGrain = GrainFactory.GetGrain<ISimOrdersGrain>(descriptor);
+      positionsGrain = GrainFactory.GetGrain<ISimPositionsGrain>(descriptor);
 
       await GrainFactory.GetGrain<ISimTransactionsGrain>(descriptor).Setup(connection, observer);
 
@@ -60,8 +68,12 @@ namespace Simulation.Grains
           var source = Path.Combine(state.Source, $"{name}.db");
           var stream = docs[name] = new SimStream(source, name);
 
+          domGrain = GrainFactory.GetGrain<IDomGrain>(instrumentDescriptor);
+          optionsGrain = GrainFactory.GetGrain<IOptionsGrain>(instrumentDescriptor);
+          instrumentGrain = GrainFactory.GetGrain<IInstrumentGrain>(instrumentDescriptor);
+
           await Subscribe(instrument);
-          await GrainFactory.GetGrain<IDomGrain>(instrumentDescriptor).StoreInstrument(instrument);
+          await domGrain.StoreInstrument(instrument);
 
           if (stream.MoveNext())
           {
@@ -125,16 +137,7 @@ namespace Simulation.Grains
         }
 
         var stream = queue.Dequeue();
-        var descriptor = this.GetDescriptor();
         var instrument = state.Account.Instruments[stream.Name];
-        var instrumentDescriptor = this.GetDescriptor(instrument.Name);
-
-        var domGrain = GrainFactory.GetGrain<IDomGrain>(instrumentDescriptor);
-        var instrumentGrain = GrainFactory.GetGrain<ISimInstrumentGrain>(instrumentDescriptor);
-        var optionsGrain = GrainFactory.GetGrain<IOptionsGrain>(instrumentDescriptor);
-        var ordersGrain = GrainFactory.GetGrain<ISimOrdersGrain>(descriptor);
-        var positionsGrain = GrainFactory.GetGrain<ISimPositionsGrain>(descriptor);
-
         var summary = stream.Current;
         var summaryOrder = summary.Order;
         var summaryInstrument = summary.Instrument;
@@ -156,30 +159,33 @@ namespace Simulation.Grains
           await domGrain.Store(summary.Dom);
         }
 
-        if (summary.Options is not null)
+        if (summary.Options is not null && summary.Options.Count is not 0)
         {
           await optionsGrain.Store(summary.Options);
+
+          var map = new HashSet<string>();
+          var orders = await ordersGrain.Orders(default);
+          var positions = await positionsGrain.Positions(default);
+
+          foreach (var order in orders.Data) map.Add(order.Operation.Instrument.Name);
+          foreach (var position in positions.Data) map.Add(position.Operation.Instrument.Name);
+          foreach (var option in summary.Options)
+          {
+            if (map.Contains(option.Name))
+            {
+              await ordersGrain.Tap(option);
+              await positionsGrain.Tap(option);
+            }
+          }
         }
 
         if (summaryInstrument is not null)
         {
-          var orders = await ordersGrain.Orders(default);
-          var positions = await positionsGrain.Positions(default);
-          var ordersMap = orders.Data.GroupBy(o => o.Operation.Instrument.Name).ToDictionary(o => o.Key);
-          var positionsMap = positions.Data.GroupBy(o => o.Operation.Instrument.Name).ToDictionary(o => o.Key);
-          var optionsMap = summary.Options.Where(o => ordersMap.ContainsKey(o.Name) || positionsMap.ContainsKey(o.Name));
           var groupResponse = await instrumentGrain.Send(summaryInstrument with { Name = instrument.Name });
           var group = groupResponse.Data;
 
           await ordersGrain.Tap(group);
           await positionsGrain.Tap(group);
-
-          foreach (var option in optionsMap)
-          {
-            await ordersGrain.Tap(option);
-            await positionsGrain.Tap(option);
-          }
-
           await observer.StreamInstrument(group);
         }
 

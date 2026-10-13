@@ -31,7 +31,7 @@ namespace Dashboard
         orleans.AddMemoryGrainStorageAsDefault();
         orleans.AddMemoryStreams<DefaultMemoryMessageBodySerializer>(nameof(Message));
         orleans.AddMemoryGrainStorage("PubSubStore");
-        orleans.AddDashboard();
+        //orleans.AddDashboard();
         orleans.Configure<GrainCollectionOptions>(options =>
         {
           options.CollectionAge = TimeSpan.FromDays(100);
@@ -71,7 +71,7 @@ namespace Dashboard
       app.UseStaticFiles();
       app.UseRouting();
       app.MapBlazorHub();
-      app.MapOrleansDashboard("/processors");
+      //app.MapOrleansDashboard("/processors");
       app.MapFallbackToPage("/Host");
       app.Run();
     }
