@@ -248,7 +248,7 @@ namespace Simulation.Grains
       var range = Range(order);
       var amount = order.Operation.Amount;
       var instrument = order.Operation.Instrument;
-      var estimate = amount * range * instrument.Leverage - instrument.Commission;
+      var estimate = amount * range * instrument.Leverage - amount * instrument.Commission;
       var balance = estimate ?? order.Balance.Current ?? 0;
 
       return order.Balance with
