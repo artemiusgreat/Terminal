@@ -2,6 +2,7 @@ using Canvas.Core.Models;
 using Canvas.Core.Shapes;
 using Core.Conventions;
 using Core.Enums;
+using Core.Extensions;
 using Core.Models;
 using Core.Services;
 using Microsoft.AspNetCore.Components;
@@ -91,7 +92,7 @@ namespace Dashboard.Pages
       var item = index <= 0 ? items.FirstOrDefault()?.X : items.LastOrDefault()?.X;
       var stamp = (long)(items.ElementAtOrDefault(index)?.X ?? item ?? DateTime.Now.Ticks);
 
-      return $"{new DateTime(stamp):MMM d HH:mm}";
+      return $"{stamp.ToDateTime():MMM d HH:mm}";
     }
 
     /// <summary>
