@@ -247,8 +247,6 @@ namespace Runner
             ouEntryDist = ed;
             var entryPx = op.Mu - ed;
             var winP = OrnsteinUhlenbeck.HitProbability(op, entryPx, entryPx + tpPts, entryPx - slPts);
-            var avgWin = MrTpTicks * 12.50 - 2 * 3.65;
-            var avgLoss = MrSlTicks * 12.50 + 2 * 3.65;
             ouContracts = 1; // fixed 1 lot, Kelly removed
             if (double.IsNaN(prevMu)) { mrHaveBand = false; }
           }

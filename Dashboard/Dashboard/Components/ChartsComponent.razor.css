@@ -1,3 +1,8 @@
 .views {
   height: 30vh;
 }
+
+.lightweight-chart {
+  width: 100%;
+  height: 100%;
+}
