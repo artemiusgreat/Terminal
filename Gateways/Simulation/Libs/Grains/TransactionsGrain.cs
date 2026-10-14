@@ -1,9 +1,11 @@
 using Core.Conventions;
 using Core.Enums;
+using Core.Extensions;
 using Core.Grains;
 using Core.Models;
 using Simulation.Models;
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace Simulation.Grains
@@ -47,11 +49,17 @@ namespace Simulation.Grains
     /// <param name="criteria"></param>
     public override Task<OrdersResponse> Transactions(TransactionCriteria criteria)
     {
+      var items = State.AsEnumerable();
       var count = Math.Min(criteria?.Count ?? State.Count, State.Count);
+
+      if (criteria?.MinDate is DateTime minDate)
+      {
+        items = items.Where(o => o.Operation.Time.Value.ToDateTime() > minDate);
+      }
 
       return Task.FromResult(new OrdersResponse
       {
-        Data = State.GetRange(State.Count - count, count)
+        Data = [.. items.TakeLast(count)]
       });
     }
   }

@@ -40,6 +40,11 @@ namespace Dashboard.Components
     protected virtual IList<Row> Items { get; set; } = [];
 
     /// <summary>
+    /// Most recent loaded trade time
+    /// </summary>
+    protected virtual DateTime? Stamp { get; set; }
+
+    /// <summary>
     /// Setup views
     /// </summary>
     /// <param name="setup"></param>
@@ -73,15 +78,21 @@ namespace Dashboard.Components
         return;
       }
 
+      if (Stamp is not null)
+      {
+        criteria ??= new TransactionCriteria() with { MinDate = Stamp };
+      }
+
       var queries = adapters.Select(o => o.GetTransactions(criteria));
       var responses = await Task.WhenAll(queries);
-      var items = new List<Row>();
+      var items = Items.ToList();
+      var change = false;
 
       foreach (var response in responses)
       {
         foreach (var o in response.Data)
         {
-          items.Add(new()
+          var item = new Row()
           {
             Name = o?.Operation?.Instrument?.Name,
             Group = o?.Operation?.Instrument?.Basis?.Name ?? o?.Operation?.Instrument?.Name,
@@ -91,13 +102,19 @@ namespace Dashboard.Components
             OpenPrice = o.Operation.AveragePrice ?? 0,
             ClosePrice = o.Operation.Price ?? 0,
             Gain = o.Balance.Current ?? 0
-          });
+          };
+
+          items.Add(item);
+          Stamp = item.Time;
+          change = true;
         }
       }
 
-      Items = items;
-
-      await (Sync = InvokeAsync(StateHasChanged));
+      if (change)
+      {
+        Items = items;
+        await (Sync = InvokeAsync(StateHasChanged));
+      }
     }
 
     /// <summary>
@@ -106,6 +123,7 @@ namespace Dashboard.Components
     public virtual void Clear()
     {
       Items = [];
+      Stamp = default;
       InvokeAsync(StateHasChanged);
     }
   }
