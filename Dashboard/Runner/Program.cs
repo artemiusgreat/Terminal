@@ -5,24 +5,20 @@ using Core.Groups;
 using Core.Models;
 using Core.Services;
 using Estimator.Models;
-using LiteDB;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Newtonsoft.Json;
 using Orleans;
 using Orleans.Configuration;
+using Orleans.Dashboard;
 using Orleans.Hosting;
 using Orleans.Providers;
 using Orleans.Serialization;
 using Simulation;
-using Simulation.Models;
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 
 namespace Runner
@@ -48,7 +44,7 @@ namespace Runner
         orleans.AddMemoryGrainStorageAsDefault();
         orleans.AddMemoryStreams<DefaultMemoryMessageBodySerializer>(nameof(Message));
         orleans.AddMemoryGrainStorage("PubSubStore");
-        // orleans.AddDashboard(); // disabled: headless backtest, dashboard is pure overhead
+        orleans.AddDashboard();
         orleans.Configure<GrainCollectionOptions>(options =>
         {
           options.CollectionAge = TimeSpan.FromDays(100);
@@ -83,11 +79,10 @@ namespace Runner
     }
   }
 
-  public class Strategy(IClusterClient connector, IConfiguration configuration, IHostApplicationLifetime lifetime)
+  public class Strategy(IClusterClient connector, IConfiguration configuration)
   {
     protected virtual IClusterClient Connector { get; set; } = connector;
     protected virtual IConfiguration Configuration { get; set; } = configuration;
-    protected virtual IHostApplicationLifetime Lifetime { get; set; } = lifetime;
 
     /// <summary>
     /// Primary gateway
@@ -99,31 +94,7 @@ namespace Runner
     TimeGroup SpanHour { get; set; }
     int PosDirection { get; set; }
     int Direction { get; set; }
-    long endTime;
-    int finalized;
-    // Mean-reversion: 2-sigma Bollinger fade. Grid-optimal region W=60m, SL=20t, TP=10t.
-    const long MrWindowNs = 60L * 60 * 1000000000L;
-    const double MrSlTicks = 20, MrTpTicks = 10, MrTickSize = 0.25;
-    // Night session only (ET): entries 18:00 -> 09:30, flat through 16:00-18:00 halt.
-    static readonly TimeZoneInfo EtZone = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
-    readonly Queue<(long t, double m)> mrWindow = new();
-    double mrSum, mrSumSq;
-    double mrPrevMid = double.NaN, mrPrevLo = double.NaN, mrPrevHi = double.NaN;
-    bool mrHaveBand;
-    int mrPos;
-    double mrEntry;
-    // OU-derived entry/sizing: 1-min bars -> OU fit every 15 min -> OptimalEntryDistance + Kelly.
-    readonly List<(double tSeconds, double x)> ouBars = new();
-    long ouLastBarMin = -1;
-    double ouBarSum;
-    int ouBarN;
-    long ouLastRefitNs;
-    double ouMu = double.NaN;
-    double ouEntryDist;
-    double ouContracts = 1;
-    const double OuBankroll = 100_000;
-    const int OuMaxContracts = 10;
-    const long OuRefitNs = 15L * 60 * 1000000000L;
+    long? Stamp;
 
     const string symName = "ES";
 
@@ -150,164 +121,73 @@ namespace Runner
       SpanMin = new() { TimeFrame = TimeSpan.FromMinutes(1) };
       SpanHour = new() { TimeFrame = TimeSpan.FromHours(1) };
 
-      // End of available tick history (timestamps are unix-ns): finalize when reached.
-      // Queried up-front; the sim opens the file afterwards.
-      using (var storage = new LiteDatabase(Path.Combine(((SimGateway)adapter).Source, "ES.db")))
-      {
-        endTime = storage.GetCollection<Summary>("prices").Query()
-          .OrderByDescending(o => o.Id).FirstOrDefault()?.Time ?? 0;
-      }
-
-      adapter.OnInstrument = async instrument =>
-      {
-        await OnTick(instrument);
-      };
-
-      // End of history: the final summaries carry no price updates, so the last
-      // record arrives here (its order time equals endTime). Shut down from a
-      // separate thread: StopApplication must not run on the grain callback thread.
-      adapter.OnDomOrder = order =>
-      {
-        if (endTime > 0 && order.Time >= endTime)
-        {
-          _ = Task.Run(() => FinalizeAsync());
-        }
-
-        return Task.CompletedTask;
-      };
-
-    }
-
-    async Task FinalizeAsync()
-    {
-      if (Interlocked.Exchange(ref finalized, 1) != 0) return;
-
-      var metrics = await GetMetrics(Adapter);
-
-      Console.WriteLine(JsonConvert.SerializeObject(metrics, Formatting.Indented));
-
-      var transactions = await GetTransactionLog(Adapter);
-
-      Console.WriteLine("TRANSACTIONS");
-      Console.WriteLine(JsonConvert.SerializeObject(transactions, Formatting.Indented));
-      Console.Out.Flush();
-
-      await Adapter.Disconnect();
-      Lifetime.StopApplication();
+      adapter.OnInstrument = OnTick;
     }
 
     public async Task OnTick(Instrument instrument)
     {
+      Stamp ??= instrument.Price.Time.Value;
+
+      if (instrument.Price.Time - Stamp > TimeSpan.FromDays(15).Ticks)
+      {
+        var metrics = await GetMetrics(Adapter);
+        var ratios = metrics["Ratios"].ToDictionary(o => o.Name, o => o.Value);
+        var losses = metrics["Losses"].ToDictionary(o => o.Name, o => o.Value);
+        var wins = metrics["Wins"].ToDictionary(o => o.Name, o => o.Value);
+        var sharpe = ratios["Sharpe"];
+        var averageWin = wins["Average $"];
+        var averageLoss = losses["Average $"];
+
+        await Adapter.Disconnect();
+        return;
+      }
+
       var price = instrument.Price;
+      var index = price.Time.Value;
       var adapter = Adapter;
-      var bid = price.Bid ?? double.NaN;
-      var ask = price.Ask ?? double.NaN;
-      if (double.IsNaN(bid) || double.IsNaN(ask)) return;
-      if ((ask - bid) / MrTickSize > 3) return; // skip insane quotes (see tick study)
-      var mid = (bid + ask) / 2;
-      var t = price.Time.Value;
-      var etSod = TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(t / 1000000L), EtZone).TimeOfDay.TotalSeconds;
-      var mrNight = etSod >= 18 * 3600 || etSod < 9.5 * 3600; // entries 18:00 -> 09:30 ET
-      var mrHalt = etSod >= 16 * 3600 && etSod < 18 * 3600;   // 16:00-18:00 ET clearing halt
+      var account = adapter.Account;
+      var asset = account.Instruments[symName];
+      var orders = (await adapter.GetOrders(default)).Data;
+      var positions = (await adapter.GetPositions(default)).Data;
 
-      mrWindow.Enqueue((t, mid)); mrSum += mid; mrSumSq += mid * mid;
-      while (mrWindow.Count > 0 && mrWindow.Peek().t < t - MrWindowNs)
+      var spanDay = SpanDay.Update(price);
+      var spanMin = SpanMin.Update(price);
+      var spanHour = SpanHour.Update(price);
+
+      var isMinLong = spanMin.Bar.Close > spanMin.Bar.Open;
+      var isMinShort = spanMin.Bar.Close < spanMin.Bar.Open;
+      var isDayLong = spanDay.Bar.Close > spanDay.Bar.Open;
+      var isDayShort = spanDay.Bar.Close < spanDay.Bar.Open;
+      var isHourLong = spanHour.Bar.Close > spanHour.Bar.Open;
+      var isHourShort = spanHour.Bar.Close < spanHour.Bar.Open;
+      var isLong = isMinLong && isHourLong && isDayLong;
+      var isShort = isMinShort && isHourShort && isDayShort;
+
+      if (positions.Count is 0)
       {
-        var o = mrWindow.Dequeue(); mrSum -= o.m; mrSumSq -= o.m * o.m;
+        switch (true)
+        {
+          case true when isLong:
+            PosDirection = 1;
+            await OpenPosition(adapter, Instruments[symName], OrderSideEnum.Long);
+            break;
+
+          case true when isShort:
+            PosDirection = -1;
+            await OpenPosition(adapter, Instruments[symName], OrderSideEnum.Short);
+            break;
+        }
       }
 
-      // OU 1-min bars
-      var barMin = t / 60000000000L;
-      if (barMin != ouLastBarMin)
+      if (positions.Count is not 0)
       {
-        if (ouLastBarMin >= 0 && ouBarN > 0)
-        {
-          ouBars.Add((ouLastBarMin * 60.0, ouBarSum / ouBarN));
-          if (ouBars.Count > 60) ouBars.RemoveAt(0);
-        }
-        ouLastBarMin = barMin; ouBarSum = mid; ouBarN = 1;
-      }
-      else { ouBarSum += mid; ouBarN++; }
+        var closeLong = PosDirection > 0 && isHourShort;
+        var closeShort = PosDirection < 0 && isHourLong;
 
-      // OU refit every 15 min
-      if (t - ouLastRefitNs >= OuRefitNs && ouBars.Count >= 60)
-      {
-        ouLastRefitNs = t;
-        try
+        if (closeLong || closeShort)
         {
-          var op = OrnsteinUhlenbeck.Fit(ouBars);
-          var tpPts = MrTpTicks * MrTickSize;
-          var slPts = MrSlTicks * MrTickSize;
-          var costPts = MrTickSize + 2 * (3.65 / 12.50 * MrTickSize);
-          var ed = OrnsteinUhlenbeck.OptimalEntryDistance(op, tpPts, slPts, costPts);
-          if (ed > 0)
-          {
-            var prevMu = ouMu;
-            ouMu = op.Mu;
-            ouEntryDist = ed;
-            var entryPx = op.Mu - ed;
-            var winP = OrnsteinUhlenbeck.HitProbability(op, entryPx, entryPx + tpPts, entryPx - slPts);
-            var avgWin = MrTpTicks * 12.50 - 2 * 3.65;
-            var avgLoss = MrSlTicks * 12.50 + 2 * 3.65;
-            ouContracts = 1; // fixed 1 lot, Kelly removed
-            if (double.IsNaN(prevMu)) { mrHaveBand = false; }
-          }
+          await ClosePosition(adapter);
         }
-        catch { }
-      }
-
-      if (mrWindow.Count >= 120)
-      {
-        var n = (double)mrWindow.Count;
-        var mean = mrSum / n;
-        var variance = mrSumSq / n - mean * mean;
-        if (variance < 0) variance = 0;
-        var sd = Math.Sqrt(variance);
-        var useOu = !double.IsNaN(ouMu) && ouEntryDist > 0;
-        var lo = useOu ? ouMu - ouEntryDist : mean - 2 * sd;
-        var hi = useOu ? ouMu + ouEntryDist : mean + 2 * sd;
-
-        if (mrPos == 0 && mrHaveBand && mrNight)
-        {
-          if (mid < lo)
-          {
-            mrPos = 1; mrEntry = ask;
-            await OpenPosition(adapter, Instruments[symName], OrderSideEnum.Long, ouContracts);
-          }
-          else if (mid > hi)
-          {
-            mrPos = -1; mrEntry = bid;
-            await OpenPosition(adapter, Instruments[symName], OrderSideEnum.Short, ouContracts);
-          }
-        }
-        else if (mrPos == 1)
-        {
-          if (mrHalt)
-          {
-            mrPos = 0;
-            await ClosePosition(adapter);
-          }
-          else if (bid <= mrEntry - MrSlTicks * MrTickSize || bid >= mrEntry + MrTpTicks * MrTickSize)
-          {
-            mrPos = 0;
-            await ClosePosition(adapter);
-          }
-        }
-        else if (mrPos == -1)
-        {
-          if (mrHalt)
-          {
-            mrPos = 0;
-            await ClosePosition(adapter);
-          }
-          else if (ask >= mrEntry + MrSlTicks * MrTickSize || ask <= mrEntry - MrTpTicks * MrTickSize)
-          {
-            mrPos = 0;
-            await ClosePosition(adapter);
-          }
-        }
-
-        mrPrevMid = mid; mrPrevLo = lo; mrPrevHi = hi; mrHaveBand = true;
       }
     }
 
@@ -442,30 +322,6 @@ namespace Runner
       }
 
       return response;
-    }
-
-    /// <summary>
-    /// Completed transactions ordered by close time
-    /// </summary>
-    /// <param name="adapters"></param>
-    public virtual async Task<IList<object>> GetTransactionLog(params IGateway[] adapters)
-    {
-      var actionResponses = await Task.WhenAll(adapters.Select(o => o.GetTransactions(default)));
-      return actionResponses
-        .SelectMany(o => o.Data)
-        .Where(o => o?.Operation?.Time is not null)
-        .OrderBy(o => o.Operation.Time)
-        .Select(o => (object)new
-        {
-          Time = new DateTime(o.Operation.Time.Value),
-          Side = o.Side?.ToString(),
-          Amount = o.Operation.Amount,
-          EntryPrice = o.Operation.AveragePrice,
-          ExitPrice = o.Operation.Price,
-          Profit = o.Balance.Current,
-          Commission = o.Operation.Instrument?.Commission
-        })
-        .ToList();
     }
 
     /// <summary>

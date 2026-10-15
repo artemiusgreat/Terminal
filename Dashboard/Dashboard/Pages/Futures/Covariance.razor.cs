@@ -142,8 +142,6 @@ namespace Dashboard.Pages.Futures
         case nameY: PriceY = price; break;
       }
 
-      if (instrument.Name == nameY) return;
-
       if (PriceX is null || PriceY is null)
       {
         return;

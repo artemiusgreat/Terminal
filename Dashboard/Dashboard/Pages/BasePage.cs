@@ -1,4 +1,5 @@
 using Canvas.Core.Models;
+using Canvas.Core.Services;
 using Canvas.Core.Shapes;
 using Core.Conventions;
 using Core.Enums;
@@ -23,6 +24,7 @@ namespace Dashboard.Pages
     [Inject] protected virtual IJSRuntime RuntimeService { get; set; }
     [Inject] protected virtual IClusterClient Connector { get; set; }
     [Inject] protected virtual IConfiguration Configuration { get; set; }
+    [Inject] protected virtual SchedulerService Scheduler { get; set; }
     [Inject] protected virtual StateService State { get; set; }
 
     /// <summary>
@@ -64,8 +66,8 @@ namespace Dashboard.Pages
 
             foreach (var adapter in Adapters.Values)
             {
-              adapter.OnDomOrder = OnDomUpdate;
-              adapter.OnInstrument = OnTradeUpdate;
+              adapter.OnDomOrder = o => Scheduler.Send(() => OnDomUpdate(o));
+              adapter.OnInstrument = o => Scheduler.Send(() => OnTradeUpdate(o));
             }
           }
         });
