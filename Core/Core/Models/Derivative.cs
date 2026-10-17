@@ -1,9 +1,11 @@
 using Core.Enums;
 using System;
+using MemoryPack;
 
 namespace Core.Models
 {
-  public record Derivative
+  [MemoryPackable]
+  public partial record Derivative
   {
     /// <summary>
     /// Strike price

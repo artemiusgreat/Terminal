@@ -1,8 +1,10 @@
 using Core.Enums;
+using MemoryPack;
 
 namespace Core.Models
 {
-  public record Currency
+  [MemoryPackable]
+  public partial record Currency
   {
     /// <summary>
     /// Currency

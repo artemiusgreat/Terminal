@@ -1,8 +1,10 @@
 using System;
+using MemoryPack;
 
 namespace Core.Models
 {
-  public record Price
+  [MemoryPackable]
+  public partial record Price
   {
     /// <summary>
     /// Bid

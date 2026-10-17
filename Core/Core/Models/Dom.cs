@@ -1,8 +1,10 @@
 using System.Collections.Generic;
+using MemoryPack;
 
 namespace Core.Models
 {
-  public record Dom
+  [MemoryPackable]
+  public partial record Dom
   {
     /// <summary>
     /// Asks

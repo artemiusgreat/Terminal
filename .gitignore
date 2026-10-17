@@ -8,6 +8,8 @@ appsettings.Production.json
 Releases/
 Events
 Logs
+# Tick-history databases (21 GB, local only — never commit)
+Data/
 
 # User-specific files
 *.suo

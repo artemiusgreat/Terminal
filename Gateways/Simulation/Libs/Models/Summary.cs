@@ -1,9 +1,11 @@
 using Core.Models;
 using System.Collections.Generic;
+using MemoryPack;
 
 namespace Simulation.Models
 {
-  public record Summary
+  [MemoryPackable]
+  public partial record Summary
   {
     /// <summary>
     /// ID

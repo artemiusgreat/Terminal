@@ -1,8 +1,10 @@
 using Core.Enums;
+using MemoryPack;
 
 namespace Core.Models
 {
-  public record Instrument
+  [MemoryPackable]
+  public partial record Instrument
   {
     /// <summary>
     /// ID

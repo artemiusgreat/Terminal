@@ -1,6 +1,9 @@
+using MemoryPack;
 namespace Core.Models
 {
-  public record Bar
+  // MemoryPack usings via global
+  [MemoryPackable]
+  public partial record Bar
   {
     /// <summary>
     /// Lowest price of the bar

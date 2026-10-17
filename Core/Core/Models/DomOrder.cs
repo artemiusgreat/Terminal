@@ -1,8 +1,10 @@
 using Core.Enums;
+using MemoryPack;
 
 namespace Core.Models
 {
-  public record DomOrder
+  [MemoryPackable]
+  public partial record DomOrder
   {
     /// <summary>
     /// Id
