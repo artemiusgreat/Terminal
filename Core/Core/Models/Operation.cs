@@ -2,36 +2,37 @@ using Core.Enums;
 
 namespace Core.Models
 {
+  [GenerateSerializer]
   public record Operation
   {
     /// <summary>
     /// Size of partially filled contract
     /// </summary>
-    public double? Amount { get; init; }
+    [Id(0)] public double? Amount { get; init; }
 
     /// <summary>
     /// Open price 
     /// </summary>
-    public double? AveragePrice { get; init; }
+    [Id(1)] public double? AveragePrice { get; init; }
 
     /// <summary>
     /// Close price 
     /// </summary>
-    public double? Price { get; init; }
+    [Id(2)] public double? Price { get; init; }
 
     /// <summary>
     /// Time stamp
     /// </summary>
-    public long? Time { get; init; }
+    [Id(3)] public long? Time { get; init; }
 
     /// <summary>
     /// Status of the order, e.g. Pending
     /// </summary>
-    public OrderStatusEnum? Status { get; init; }
+    [Id(4)] public OrderStatusEnum? Status { get; init; }
 
     /// <summary>
     /// Instrument to buy or sell
     /// </summary>
-    public Instrument Instrument { get; init; }
+    [Id(5)] public Instrument Instrument { get; init; }
   }
 }

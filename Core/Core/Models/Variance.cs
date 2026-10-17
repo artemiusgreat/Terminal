@@ -1,30 +1,31 @@
 namespace Core.Models
 {
+  [GenerateSerializer]
   public record Variance
   {
     /// <summary>
     /// Delta
     /// </summary>
-    public double? Delta { get; init; }
+    [Id(0)] public double? Delta { get; init; }
 
     /// <summary>
     /// Gamma
     /// </summary>
-    public double? Gamma { get; init; }
+    [Id(1)] public double? Gamma { get; init; }
 
     /// <summary>
     /// Rho
     /// </summary>
-    public double? Rho { get; init; }
+    [Id(2)] public double? Rho { get; init; }
 
     /// <summary>
     /// Theta
     /// </summary>
-    public double? Theta { get; init; }
+    [Id(3)] public double? Theta { get; init; }
 
     /// <summary>
     /// Vega
     /// </summary>
-    public double? Vega { get; init; }
+    [Id(4)] public double? Vega { get; init; }
   }
 }

@@ -3,31 +3,32 @@ using System;
 
 namespace Core.Models
 {
+  [GenerateSerializer]
   public record Message
   {
     /// <summary>
     /// Message or error code
     /// </summary>
-    public int? Code { get; init; }
+    [Id(0)] public int? Code { get; init; }
 
     /// <summary>
     /// Description
     /// </summary>
-    public string Source { get; init; }
+    [Id(1)] public string Source { get; init; }
 
     /// <summary>
     /// Description
     /// </summary>
-    public string Description { get; init; }
+    [Id(2)] public string Description { get; init; }
 
     /// <summary>
     /// Action
     /// </summary>
-    public ActionEnum Action { get; init; }
+    [Id(3)] public ActionEnum Action { get; init; }
 
     /// <summary>
     /// Exception
     /// </summary>
-    public Exception Error { get; init; }
+    [Id(4)] public Exception Error { get; init; }
   }
 }

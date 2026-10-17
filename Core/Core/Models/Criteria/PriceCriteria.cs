@@ -2,31 +2,33 @@ using Core.Enums;
 
 namespace Core.Models
 {
+  [Immutable]
+  [GenerateSerializer]
   public record PriceCriteria : Criteria
   {
     /// <summary>
     /// Duration
     /// </summary>
-    public int? Frame { get; init; }
+    [Id(8)] public int? Frame { get; init; }
 
     /// <summary>
     /// Duration
     /// </summary>
-    public int? Duration { get; init; }
+    [Id(9)] public int? Duration { get; init; }
 
     /// <summary>
     /// Price type - bars, trades, ticks
     /// </summary>
-    public PriceTypeEnum PriceType { get; init; }
+    [Id(10)] public PriceTypeEnum PriceType { get; init; }
 
     /// <summary>
     /// Period type - day, hour, minute
     /// </summary>
-    public string FrameType { get; init; }
+    [Id(11)] public string FrameType { get; init; }
 
     /// <summary>
     /// Duration type - year, month, day
     /// </summary>
-    public string DurationType { get; init; }
+    [Id(12)] public string DurationType { get; init; }
   }
 }

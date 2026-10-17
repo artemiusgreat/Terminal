@@ -1,15 +1,17 @@
 namespace Core.Models
 {
+  [Immutable]
+  [GenerateSerializer]
   public record OrderResponse : Response
   {
     /// <summary>
     /// Data
     /// </summary>
-    public Order Data { get; init; }
+    [Id(1)] public Order Data { get; init; }
 
     /// <summary>
     /// Transaction
     /// </summary>
-    public Order Transaction { get; init; }
+    [Id(2)] public Order Transaction { get; init; }
   }
 }

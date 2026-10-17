@@ -2,46 +2,47 @@ using System;
 
 namespace Core.Models
 {
+  [GenerateSerializer]
   public record Price
   {
     /// <summary>
     /// Bid
     /// </summary>
-    public double? Bid { get; init; }
+    [Id(0)] public double? Bid { get; init; }
 
     /// <summary>
     /// Ask
     /// </summary>
-    public double? Ask { get; init; }
+    [Id(1)] public double? Ask { get; init; }
 
     /// <summary>
     /// Volume of the bid 
     /// </summary>
-    public double? BidSize { get; init; }
+    [Id(2)] public double? BidSize { get; init; }
 
     /// <summary>
     /// Volume of the ask
     /// </summary>
-    public double? AskSize { get; init; }
+    [Id(3)] public double? AskSize { get; init; }
 
     /// <summary>
     /// Last price or value
     /// </summary>
-    public double? Last { get; init; }
+    [Id(4)] public double? Last { get; init; }
 
     /// <summary>
     /// Instrument volume
     /// </summary>
-    public double? Volume { get; init; }
+    [Id(5)] public double? Volume { get; init; }
 
     /// <summary>
     /// Time stamp
     /// </summary>
-    public long? Time { get; init; }
+    [Id(6)] public long? Time { get; init; }
 
     /// <summary>
     /// Reference to the complex data point
     /// </summary>
-    public Bar Bar { get; init; }
+    [Id(7)] public Bar Bar { get; init; }
   }
 }

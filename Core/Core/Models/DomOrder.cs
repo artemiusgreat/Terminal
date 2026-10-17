@@ -2,56 +2,58 @@ using Core.Enums;
 
 namespace Core.Models
 {
+  [Immutable]
+  [GenerateSerializer]
   public record DomOrder
   {
     /// <summary>
     /// Id
     /// </summary>
-    public string Id { get; init; }
+    [Id(0)] public string Id { get; init; }
 
     /// <summary>
     /// Name
     /// </summary>
-    public string Name { get; init; }
+    [Id(1)] public string Name { get; init; }
 
     /// <summary>
     /// Source of order
     /// </summary>
-    public string Source { get; init; }
+    [Id(2)] public string Source { get; init; }
 
     /// <summary>
     /// Flags
     /// </summary>
-    public int? Mask { get; init; }
+    [Id(3)] public int? Mask { get; init; }
 
     /// <summary>
     /// Sequence number
     /// </summary>
-    public int? Index { get; init; }
+    [Id(4)] public int? Index { get; init; }
 
     /// <summary>
     /// Size
     /// </summary>
-    public double? Size { get; init; }
+    [Id(5)] public double? Size { get; init; }
 
     /// <summary>
     /// Price
     /// </summary>
-    public double? Price { get; init; }
+    [Id(6)] public double? Price { get; init; }
 
     /// <summary>
     /// Time stamp
     /// </summary>
-    public long? Time { get; init; }
+    [Id(7)] public long? Time { get; init; }
 
     /// <summary>
     /// Side
     /// </summary>
-    public DomSide? Side { get; init; }
+    [Id(8)] public DomSide? Side { get; init; }
 
     /// <summary>
     /// Action
     /// </summary>
-    public DomAction? Action { get; init; }
+    [Id(9)] public DomAction? Action { get; init; }
   }
 }

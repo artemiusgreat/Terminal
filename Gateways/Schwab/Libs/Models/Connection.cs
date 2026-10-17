@@ -1,38 +1,40 @@
 using Core.Models;
+using Orleans;
 using System;
 
 namespace Schwab.Models
 {
+  [GenerateSerializer]
   public record Connection
   {
     /// <summary>
     /// Client ID
     /// </summary>
-    public string Id { get; init; }
+    [Id(0)] public string Id { get; init; }
 
     /// <summary>
     /// Client secret
     /// </summary>
-    public string Secret { get; init; }
+    [Id(1)] public string Secret { get; init; }
 
     /// <summary>
     /// Access token
     /// </summary>
-    public string AccessToken { get; init; }
+    [Id(2)] public string AccessToken { get; init; }
 
     /// <summary>
     /// Refresh token
     /// </summary>
-    public string RefreshToken { get; init; }
+    [Id(3)] public string RefreshToken { get; init; }
 
     /// <summary>
     /// Timeout
     /// </summary>
-    public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(5);
+    [Id(4)] public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Account
     /// </summary>
-    public Account Account { get; init; }
+    [Id(5)] public Account Account { get; init; }
   }
 }

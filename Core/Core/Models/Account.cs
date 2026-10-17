@@ -2,26 +2,27 @@ using System.Collections.Generic;
 
 namespace Core.Models
 {
+  [GenerateSerializer]
   public record Account
   {
     /// <summary>
     /// Name
     /// </summary>
-    public string Descriptor { get; init; }
+    [Id(0)] public string Descriptor { get; init; }
 
     /// <summary>
     /// Balance
     /// </summary>
-    public double? Balance { get; init; } = 0;
+    [Id(1)] public double? Balance { get; init; } = 0;
 
     /// <summary>
     /// State of the account in the beginning
     /// </summary>
-    public double? Performance { get; init; } = 0;
+    [Id(2)] public double? Performance { get; init; } = 0;
 
     /// <summary>
     /// Instruments
     /// </summary>
-    public Dictionary<string, Instrument> Instruments { get; init; } = new();
+    [Id(3)] public Dictionary<string, Instrument> Instruments { get; init; } = new();
   }
 }

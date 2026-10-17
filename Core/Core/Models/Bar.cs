@@ -1,30 +1,31 @@
 namespace Core.Models
 {
+  [GenerateSerializer]
   public record Bar
   {
     /// <summary>
     /// Lowest price of the bar
     /// </summary>
-    public double? Low { get; init; }
+    [Id(0)] public double? Low { get; init; }
 
     /// <summary>
     /// Highest price of the bar
     /// </summary>
-    public double? High { get; init; }
+    [Id(1)] public double? High { get; init; }
 
     /// <summary>
     /// Open price of the bar
     /// </summary>
-    public double? Open { get; init; }
+    [Id(2)] public double? Open { get; init; }
 
     /// <summary>
     /// Close price of the bar
     /// </summary>
-    public double? Close { get; init; }
+    [Id(3)] public double? Close { get; init; }
 
     /// <summary>
     /// Time stamp
     /// </summary>
-    public long? Time { get; init; }
+    [Id(4)] public long? Time { get; init; }
   }
 }

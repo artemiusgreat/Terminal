@@ -1,10 +1,12 @@
 namespace Core.Models
 {
+  [Immutable]
+  [GenerateSerializer]
   public record InstrumentResponse : Response
   {
     /// <summary>
     /// Data
     /// </summary>
-    public Instrument Data { get; init; }
+    [Id(1)] public Instrument Data { get; init; }
   }
 }

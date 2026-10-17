@@ -1,28 +1,30 @@
 using Core.Models;
+using Orleans;
 using System;
 
 namespace Topstep.Models
 {
+  [GenerateSerializer]
   public record Connection
   {
     /// <summary>
     /// Username
     /// </summary>
-    public string Username { get; init; }
+    [Id(0)] public string Username { get; init; }
 
     /// <summary>
     /// Access token
     /// </summary>
-    public string Token { get; init; }
+    [Id(1)] public string Token { get; init; }
 
     /// <summary>
     /// Timeout
     /// </summary>
-    public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(5);
+    [Id(2)] public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Account
     /// </summary>
-    public Account Account { get; init; }
+    [Id(3)] public Account Account { get; init; }
   }
 }

@@ -3,76 +3,77 @@ using System.Collections.Generic;
 
 namespace Core.Models
 {
+  [GenerateSerializer]
   public record Order
   {
     /// <summary>
     /// Client order ID
     /// </summary>
-    public string Id { get; init; }
+    [Id(0)] public string Id { get; init; }
 
     /// <summary>
     /// Group
     /// </summary>
-    public string Descriptor { get; init; }
+    [Id(1)] public string Descriptor { get; init; }
 
     /// <summary>
     /// Time stamp
     /// </summary>
-    public long? Time { get; init; }
+    [Id(2)] public long? Time { get; init; }
 
     /// <summary>
     /// Contract size
     /// </summary>
-    public double? Amount { get; init; }
+    [Id(3)] public double? Amount { get; init; }
 
     /// <summary>
     /// Price the makes order active, e.g. limit price for stop limit order
     /// </summary>
-    public double? ActivationPrice { get; init; }
+    [Id(4)] public double? ActivationPrice { get; init; }
 
     /// <summary>
     /// Desired price for the order to fill, e.g. stop price for stop order and limit price for limit order
     /// </summary>
-    public double? Price { get; init; }
+    [Id(5)] public double? Price { get; init; }
 
     /// <summary>
     /// Type
     /// </summary>
-    public OrderTypeEnum? Type { get; init; } = OrderTypeEnum.Market;
+    [Id(6)] public OrderTypeEnum? Type { get; init; } = OrderTypeEnum.Market;
 
     /// <summary>
     /// Side
     /// </summary>
-    public OrderSideEnum? Side { get; init; }
+    [Id(7)] public OrderSideEnum? Side { get; init; }
 
     /// <summary>
     /// Time in force
     /// </summary>
-    public OrderTimeSpanEnum? TimeSpan { get; init; } = OrderTimeSpanEnum.GTC;
+    [Id(8)] public OrderTimeSpanEnum? TimeSpan { get; init; } = OrderTimeSpanEnum.GTC;
 
     /// <summary>
     /// Custom order type
     /// </summary>
-    public InstructionEnum? Instruction { get; init; }
+    [Id(9)] public InstructionEnum? Instruction { get; init; }
 
     /// <summary>
     /// Account
     /// </summary>
-    public Account Account { get; init; }
+    [Id(10)] public Account Account { get; init; }
 
     /// <summary>
     /// Balance
     /// </summary>
-    public Balance Balance { get; init; } = new();
+    [Id(11)] public Balance Balance { get; init; } = new();
 
     /// <summary>
     /// Transaction
     /// </summary>
-    public Operation Operation { get; init; }
+    [Id(12)] public Operation Operation { get; init; }
 
     /// <summary>
     /// List of related orders in the hierarchy
     /// </summary>
-    public List<Order> Orders { get; init; } = [];
+    [Id(13)] public List<Order> Orders { get; init; } = [];
   }
 }

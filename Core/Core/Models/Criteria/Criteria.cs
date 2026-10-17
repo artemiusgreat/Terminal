@@ -2,46 +2,48 @@ using System;
 
 namespace Core.Models
 {
+  [Immutable]
+  [GenerateSerializer]
   public record Criteria
   {
     /// <summary>
     /// Count
     /// </summary>
-    public int? Count { get; init; }
+    [Id(0)] public int? Count { get; init; }
 
     /// <summary>
     /// Bypass cache
     /// </summary>
-    public bool Source { get; init; }
+    [Id(1)] public bool Source { get; init; }
 
     /// <summary>
     /// Start date
     /// </summary>
-    public double? MinPrice { get; init; }
+    [Id(2)] public double? MinPrice { get; init; }
 
     /// <summary>
     /// End date
     /// </summary>
-    public double? MaxPrice { get; init; }
+    [Id(3)] public double? MaxPrice { get; init; }
 
     /// <summary>
     /// Start date
     /// </summary>
-    public DateTime? MinDate { get; init; }
+    [Id(4)] public DateTime? MinDate { get; init; }
 
     /// <summary>
     /// End date
     /// </summary>
-    public DateTime? MaxDate { get; init; }
+    [Id(5)] public DateTime? MaxDate { get; init; }
 
     /// <summary>
     /// Account
     /// </summary>
-    public Account Account { get; init; }
+    [Id(6)] public Account Account { get; init; }
 
     /// <summary>
     /// Instrument
     /// </summary>
-    public Instrument Instrument { get; init; }
+    [Id(7)] public Instrument Instrument { get; init; }
   }
 }

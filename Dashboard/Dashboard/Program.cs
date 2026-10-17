@@ -12,7 +12,6 @@ using Orleans.Configuration;
 using Orleans.Dashboard;
 using Orleans.Hosting;
 using Orleans.Providers;
-using Orleans.Serialization;
 using System;
 
 namespace Dashboard
@@ -44,10 +43,6 @@ namespace Dashboard
           var converter = new ConversionService();
 
           services.AddSingleton(converter.MessageOptions);
-          services.AddSerializer(serBuilder => serBuilder.AddMessagePackSerializer(
-            o => true,
-            o => true,
-            o => o.Configure(options => options.SerializerOptions = converter.MessageOptions)));
         });
       });
 

@@ -2,16 +2,18 @@ using Core.Enums;
 
 namespace Core.Models
 {
+  [Immutable]
+  [GenerateSerializer]
   public record OrderCriteria : Criteria
   {
     /// <summary>
     /// Order ID
     /// </summary>
-    public string Id { get; init; }
+    [Id(8)] public string Id { get; init; }
 
     /// <summary>
     /// Status
     /// </summary>
-    public OrderStatusEnum Status { get; init; }
+    [Id(9)] public OrderStatusEnum Status { get; init; }
   }
 }

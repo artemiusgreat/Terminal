@@ -2,16 +2,17 @@ using Core.Enums;
 
 namespace Core.Models
 {
+  [GenerateSerializer]
   public record Subscription
   {
     /// <summary>
     /// Next state
     /// </summary>
-    public SubscriptionEnum Next { get; init; }
+    [Id(0)] public SubscriptionEnum Next { get; init; }
 
     /// <summary>
     /// Previous state
     /// </summary>
-    public SubscriptionEnum Previous { get; init; }
+    [Id(1)] public SubscriptionEnum Previous { get; init; }
   }
 }

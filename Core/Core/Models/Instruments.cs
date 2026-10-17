@@ -2,11 +2,12 @@ using System.Collections.Generic;
 
 namespace Core.Models
 {
+  [GenerateSerializer]
   public record Instruments
   {
     /// <summary>
     /// Instruments
     /// </summary>
-    public List<Instrument> Items { get; init; } = [];
+    [Id(0)] public List<Instrument> Items { get; init; } = [];
   }
 }

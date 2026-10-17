@@ -1,10 +1,12 @@
 namespace Core.Models
 {
+  [Immutable]
+  [GenerateSerializer]
   public record DescriptorResponse : Response
   {
     /// <summary>
     /// Data
     /// </summary>
-    public string Data { get; init; }
+    [Id(1)] public string Data { get; init; }
   }
 }

@@ -112,7 +112,7 @@ namespace Dashboard.Pages.Futures
 
       OrdersView.Update(Adapters.Values);
       PositionsView.Update(Adapters.Values);
-      TransactionsView.Update(Adapters.Values, new() { Count = 100 });
+      TransactionsView.Update(Adapters.Values, new() { Count = 10 });
       PerformanceView.Update(index, nameof(PerformanceView), "Balance", new AreaShape { Y = account.Balance + account.Performance });
       PerformanceView.Update(index, nameof(PerformanceView), "PnL", new LineShape { Y = performance, Component = ComDown });
 

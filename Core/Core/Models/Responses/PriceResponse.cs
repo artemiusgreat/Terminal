@@ -1,10 +1,12 @@
 namespace Core.Models
 {
+  [Immutable]
+  [GenerateSerializer]
   public record PriceResponse : Response
   {
     /// <summary>
     /// Data
     /// </summary>
-    public Price Data { get; init; }
+    [Id(1)] public Price Data { get; init; }
   }
 }

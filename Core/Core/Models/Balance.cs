@@ -1,20 +1,21 @@
 namespace Core.Models
 {
+  [GenerateSerializer]
   public record Balance
   {
     /// <summary>
     /// Current PnL
     /// </summary>
-    public double? Current { get; init; }
+    [Id(0)] public double? Current { get; init; }
 
     /// <summary>
     /// Min possible PnL in account's currency
     /// </summary>
-    public double? Min { get; init; }
+    [Id(1)] public double? Min { get; init; }
 
     /// <summary>
     /// Max possible PnL in account's currency
     /// </summary>
-    public double? Max { get; init; }
+    [Id(2)] public double? Max { get; init; }
   }
 }

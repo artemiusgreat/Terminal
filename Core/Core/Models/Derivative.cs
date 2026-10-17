@@ -3,46 +3,47 @@ using System;
 
 namespace Core.Models
 {
+  [GenerateSerializer]
   public record Derivative
   {
     /// <summary>
     /// Strike price
     /// </summary>
-    public double? Strike { get; init; }
+    [Id(0)] public double? Strike { get; init; }
 
     /// <summary>
     /// Open interest
     /// </summary>
-    public double? OpenInterest { get; init; }
+    [Id(1)] public double? OpenInterest { get; init; }
 
     /// <summary>
     /// Intrinsic value
     /// </summary>
-    public double? IntrinsicValue { get; init; }
+    [Id(2)] public double? IntrinsicValue { get; init; }
 
     /// <summary>
     /// Implied volatility
     /// </summary>
-    public double? Volatility { get; init; }
+    [Id(3)] public double? Volatility { get; init; }
 
     /// <summary>
     /// CALL or PUT
     /// </summary>
-    public OptionSideEnum? Side { get; init; }
+    [Id(4)] public OptionSideEnum? Side { get; init; }
 
     /// <summary>
     /// Expiration date
     /// </summary>
-    public DateTime? ExpirationDate { get; init; }
+    [Id(5)] public DateTime? ExpirationDate { get; init; }
 
     /// <summary>
     /// Last trading date
     /// </summary>
-    public DateTime? TradeDate { get; init; }
+    [Id(6)] public DateTime? TradeDate { get; init; }
 
     /// <summary>
     /// Option metrics
     /// </summary>
-    public Variance Variance { get; init; }
+    [Id(7)] public Variance Variance { get; init; }
   }
 }

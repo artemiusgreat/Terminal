@@ -1,17 +1,19 @@
 using Core.Models;
+using Orleans;
 
 namespace Simulation.Models
 {
+  [GenerateSerializer]
   public record Connection
   {
     /// <summary>
     /// Data source
     /// </summary>
-    public string Source { get; init; }
+    [Id(0)] public string Source { get; init; }
 
     /// <summary>
     /// Account
     /// </summary>
-    public Account Account { get; init; }
+    [Id(1)] public Account Account { get; init; }
   }
 }

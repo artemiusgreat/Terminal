@@ -2,11 +2,13 @@ using System.Collections.Generic;
 
 namespace Core.Models
 {
+  [Immutable]
+  [GenerateSerializer]
   public record OrdersResponse : Response
   {
     /// <summary>
     /// Data
     /// </summary>
-    public List<Order> Data { get; init; } = [];
+    [Id(1)] public List<Order> Data { get; init; } = [];
   }
 }

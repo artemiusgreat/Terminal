@@ -1,10 +1,12 @@
 namespace Core.Models
 {
+  [Immutable]
+  [GenerateSerializer]
   public record DomOrderResponse : Response
   {
     /// <summary>
     /// Data
     /// </summary>
-    public DomOrder Data { get; init; }
+    [Id(1)] public DomOrder Data { get; init; }
   }
 }

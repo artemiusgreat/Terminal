@@ -1,28 +1,30 @@
 using Core.Models;
+using Orleans;
 using System;
 
 namespace Tradier.Models
 {
+  [GenerateSerializer]
   public record Connection
   {
     /// <summary>
     /// Access token
     /// </summary>
-    public string AccessToken { get; init; }
+    [Id(0)] public string AccessToken { get; init; }
 
     /// <summary>
     /// Streaming session token
     /// </summary>
-    public string SessionToken { get; init; }
+    [Id(1)] public string SessionToken { get; init; }
 
     /// <summary>
     /// Timeout
     /// </summary>
-    public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(5);
+    [Id(2)] public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Account
     /// </summary>
-    public Account Account { get; init; }
+    [Id(3)] public Account Account { get; init; }
   }
 }
