@@ -30,6 +30,27 @@ namespace Simulation
   ///
   /// Use TickFileConverter to build .ticks files from LiteDB sources (one-time).
   /// </summary>
+  /// <summary>
+  /// Fixed 48-byte tick record. Pack=1 guarantees no padding —
+  /// the struct maps byte-for-byte onto the file layout.
+  /// </summary>
+  [System.Runtime.InteropServices.StructLayout(
+    System.Runtime.InteropServices.LayoutKind.Sequential, Pack = 1)]
+  struct TickRecord
+  {
+    public long TimeNs;     // offset 0
+    public int BidTicks;    // offset 8
+    public int AskTicks;    // offset 12
+    public int TradeTicks;  // offset 16
+    public int BidSize;     // offset 20
+    public int AskSize;     // offset 24
+    public int TradeSize;   // offset 28
+    public int VarOffset;   // offset 32
+    public int VarLength;   // offset 36
+    public int Flags;       // offset 40
+    public int Reserved;    // offset 44
+  } // 48 bytes total
+
   public class MmapSummaryReader : ISummaryReader
   {
     public const int Magic = 0x5449434B; // "TICK"
@@ -55,9 +76,6 @@ namespace Simulation
     long position = -1;
     Summary current;
     bool disposed;
-
-    // Reusable buffer for fixed record reads (48 bytes)
-    readonly byte[] recordBuf = new byte[RecordSize];
 
     public Summary Current => current;
 
@@ -88,25 +106,16 @@ namespace Simulation
       position++;
 
       var recordOffset = HeaderSize + position * RecordSize;
-      accessor.ReadArray(recordOffset, recordBuf, 0, RecordSize);
 
-      var timeNs = BitConverter.ToInt64(recordBuf, 0);
-      var bidTicks = BitConverter.ToInt32(recordBuf, 8);
-      var askTicks = BitConverter.ToInt32(recordBuf, 12);
-      var tradeTicks = BitConverter.ToInt32(recordBuf, 16);
-      var bidSize = BitConverter.ToInt32(recordBuf, 20);
-      var askSize = BitConverter.ToInt32(recordBuf, 24);
-      var tradeSize = BitConverter.ToInt32(recordBuf, 28);
-      var varOffset = BitConverter.ToInt32(recordBuf, 32);
-      var varLength = BitConverter.ToInt32(recordBuf, 36);
-      var flags = BitConverter.ToInt32(recordBuf, 40);
-      // bytes 44-47: reserved
+      // Direct struct copy from the mapped view — single 48-byte read,
+      // no per-field BitConverter calls.
+      accessor.Read(recordOffset, out TickRecord rec);
 
-      if ((flags & FlagHasVarData) != 0 && varLength > 0)
+      if ((rec.Flags & FlagHasVarData) != 0 && rec.VarLength > 0)
       {
         // Rare path: deserialize full Summary from variable region
-        var blob = new byte[varLength];
-        accessor.ReadArray(varRegionOffset + varOffset, blob, 0, varLength);
+        var blob = new byte[rec.VarLength];
+        accessor.ReadArray(varRegionOffset + rec.VarOffset, blob, 0, rec.VarLength);
         current = MessagePackSerializer.Deserialize<Summary>(blob, MsgPackOptions);
       }
       else
@@ -114,17 +123,17 @@ namespace Simulation
         // Hot path: build minimal Summary from fixed record (no deserialization)
         current = new Summary
         {
-          Time = timeNs,
+          Time = rec.TimeNs,
           Instrument = new Core.Models.Instrument
           {
             Name = Name,
             Price = new Core.Models.Price
             {
-              Time = timeNs,
-              Bid = bidTicks / PriceScale,
-              Ask = askTicks / PriceScale,
-              BidSize = bidSize,
-              AskSize = askSize,
+              Time = rec.TimeNs,
+              Bid = rec.BidTicks / PriceScale,
+              Ask = rec.AskTicks / PriceScale,
+              BidSize = rec.BidSize,
+              AskSize = rec.AskSize,
             }
           }
         };
