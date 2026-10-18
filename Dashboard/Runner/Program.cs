@@ -5,20 +5,25 @@ using Core.Groups;
 using Core.Models;
 using Core.Services;
 using Estimator.Models;
+using Estimator.Services;
+using LiteDB;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Newtonsoft.Json;
 using Orleans;
 using Orleans.Configuration;
-using Orleans.Dashboard;
 using Orleans.Hosting;
 using Orleans.Providers;
 using Orleans.Serialization;
 using Simulation;
+using Simulation.Models;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Runner
@@ -44,7 +49,7 @@ namespace Runner
         orleans.AddMemoryGrainStorageAsDefault();
         orleans.AddMemoryStreams<DefaultMemoryMessageBodySerializer>(nameof(Message));
         orleans.AddMemoryGrainStorage("PubSubStore");
-        orleans.AddDashboard();
+        // orleans.AddDashboard(); // disabled: headless backtest, dashboard is pure overhead
         orleans.Configure<GrainCollectionOptions>(options =>
         {
           options.CollectionAge = TimeSpan.FromDays(100);
@@ -79,10 +84,11 @@ namespace Runner
     }
   }
 
-  public class Strategy(IClusterClient connector, IConfiguration configuration)
+  public class Strategy(IClusterClient connector, IConfiguration configuration, IHostApplicationLifetime lifetime)
   {
     protected virtual IClusterClient Connector { get; set; } = connector;
     protected virtual IConfiguration Configuration { get; set; } = configuration;
+    protected virtual IHostApplicationLifetime Lifetime { get; set; } = lifetime;
 
     /// <summary>
     /// Primary gateway
@@ -94,13 +100,64 @@ namespace Runner
     TimeGroup SpanHour { get; set; }
     int PosDirection { get; set; }
     int Direction { get; set; }
-    long? Stamp;
+    long endTime;
+    int finalized;
+    // Mean-reversion: 2-sigma Bollinger fade. Grid-optimal region W=60m, SL=20t, TP=10t.
+    const long MrWindowNs = 60L * 60 * 1000000000L;
+    const double MrSlTicks = 20, MrTpTicks = 10, MrTickSize = 0.25;
+    // Night session only (ET): entries 18:00 -> 09:30, flat through 16:00-18:00 halt.
+    static readonly TimeZoneInfo EtZone = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+    readonly Queue<(long t, double m)> mrWindow = new();
+    double mrSum, mrSumSq;
+    double mrPrevMid = double.NaN, mrPrevLo = double.NaN, mrPrevHi = double.NaN;
+    bool mrHaveBand;
+    int mrPos;
+    double mrEntry;
+    // OU-derived entry/sizing: 1-min bars -> OU fit every 15 min -> OptimalEntryDistance + Kelly.
+    readonly List<(double tSeconds, double x)> ouBars = new();
+    long ouLastBarMin = -1;
+    double ouBarSum;
+    int ouBarN;
+    long ouLastRefitNs;
+    double ouMu = double.NaN;
+    double ouEntryDist;
+    double ouContracts = 1;
+    const double OuBankroll = 100_000;
+    const int OuMaxContracts = 10;
+    const long OuRefitNs = 15L * 60 * 1000000000L;
+
+    // Lead-lag measurement (Hayashi-Yoshida)
+    readonly LeadService leadService = new LeadService(5L * 60 * 1000000000L); // 5-min frame
+    double leadPrevEsPx = double.NaN, leadPrevNqPx = double.NaN;
+    long leadPrevEsT = 0, leadPrevNqT = 0;
+    long leadLastLogT = 0;
+    static readonly long[] leadLagsNs = new long[] {
+      -10_000_000_000L, -5_000_000_000L, -2_000_000_000L, -1_000_000_000L, -500_000_000L,
+      0,
+      500_000_000L, 1_000_000_000L, 2_000_000_000L, 5_000_000_000L, 10_000_000_000L
+    };
+
+    // Lead-lag follower strategy: NQ leads ES by ~0.5s
+    // Entry: NQ impulse >= 6 ticks in 500ms, ES < 2 ticks (hasn't reacted) -> trade ES in NQ direction
+    // Exit: ES catches up (+3 ticks TP), -3 ticks SL, or 2s timeout
+    const long LlWindowNs = 500_000_000L; // 500ms impulse window
+    const double LlNqImpulseTicks = 6;    // NQ must move >= 6 ticks
+    const double LlEsQuietTicks = 2;      // ES must move < 2 ticks (hasn't reacted)
+    const double LlTpTicks = 3, LlSlTicks = 3;
+    const long LlTimeoutNs = 2_000_000_000L; // 2s
+    readonly Queue<(long t, double px)> llNqQ = new(), llEsQ = new();
+    int llPos = 0; // +1 long ES, -1 short ES, 0 flat
+    double llEntryPx = 0;
+    long llEntryT = 0;
+    long llFirstT = 0;
+    const long LlTestNs = 3L * 60 * 60 * 1000000000L; // 3-hour test window
 
     const string symName = "ES";
 
     Dictionary<string, Instrument> Instruments = new()
     {
-      [symName] = new() { Name = symName, Leverage = 50, Commission = 3.65, StepSize = 0.25 },
+      [symName] = new() { Name = symName, Leverage = 50, Commission = 1.0, StepSize = 0.25 },
+      ["NQ"] = new() { Name = "NQ", Leverage = 20, Commission = 1.0, StepSize = 0.25 },
     };
 
     public void Setup()
@@ -108,7 +165,7 @@ namespace Runner
       var adapter = Adapter = new SimGateway
       {
         Connector = Connector,
-        Source = "D:/Code/NET/Terminal/Data/FUTS",
+        Source = "/home/hatch/workspace/terminal-backtester/Data/FUTS",
         Account = new()
         {
           Descriptor = "Demo",
@@ -121,73 +178,260 @@ namespace Runner
       SpanMin = new() { TimeFrame = TimeSpan.FromMinutes(1) };
       SpanHour = new() { TimeFrame = TimeSpan.FromHours(1) };
 
-      adapter.OnInstrument = OnTick;
+      // End of available tick history (timestamps are unix-ns): finalize when reached.
+      // Queried up-front; the sim opens the file afterwards.
+      using (var storage = new LiteDatabase(Path.Combine(((SimGateway)adapter).Source, "ES.db")))
+      {
+        endTime = storage.GetCollection<Summary>("prices").Query()
+          .OrderByDescending(o => o.Id).FirstOrDefault()?.Time ?? 0;
+      }
+
+      adapter.OnInstrument = async instrument =>
+      {
+        await OnTick(instrument);
+      };
+
+      // End of history: the final summaries carry no price updates, so the last
+      // record arrives here (its order time equals endTime). Shut down from a
+      // separate thread: StopApplication must not run on the grain callback thread.
+      adapter.OnDomOrder = order =>
+      {
+        if (endTime > 0 && order.Time >= endTime)
+        {
+          _ = Task.Run(() => FinalizeAsync());
+        }
+
+        return Task.CompletedTask;
+      };
+
+    }
+
+    async Task FinalizeAsync()
+    {
+      if (Interlocked.Exchange(ref finalized, 1) != 0) return;
+
+      var metrics = await GetMetrics(Adapter);
+
+      Console.WriteLine(JsonConvert.SerializeObject(metrics, Formatting.Indented));
+
+      var transactions = await GetTransactionLog(Adapter);
+
+      Console.WriteLine("TRANSACTIONS");
+      Console.WriteLine(JsonConvert.SerializeObject(transactions, Formatting.Indented));
+      Console.Out.Flush();
+
+      await Adapter.Disconnect();
+      Lifetime.StopApplication();
     }
 
     public async Task OnTick(Instrument instrument)
     {
-      Stamp ??= instrument.Price.Time.Value;
+      var price = instrument.Price;
+      var adapter = Adapter;
+      var bid = price.Bid ?? double.NaN;
+      var ask = price.Ask ?? double.NaN;
+      if (double.IsNaN(bid) || double.IsNaN(ask)) return;
+      if ((ask - bid) / MrTickSize > 3) return; // skip insane quotes (see tick study)
+      var mid = (bid + ask) / 2;
+      var t = price.Time.Value;
 
-      if (instrument.Price.Time - Stamp > TimeSpan.FromDays(15).Ticks)
+      // Lead-lag: feed log returns into Hayashi-Yoshida estimator
+      var sym = instrument.Name;
+      if (sym == "ES" || sym == "NQ")
       {
-        var metrics = await GetMetrics(Adapter);
-        var ratios = metrics["Ratios"].ToDictionary(o => o.Name, o => o.Value);
-        var losses = metrics["Losses"].ToDictionary(o => o.Name, o => o.Value);
-        var wins = metrics["Wins"].ToDictionary(o => o.Name, o => o.Value);
-        var sharpe = ratios["Sharpe"];
-        var averageWin = wins["Average $"];
-        var averageLoss = losses["Average $"];
+        if (sym == "ES")
+        {
+          if (!double.IsNaN(leadPrevEsPx) && t > leadPrevEsT)
+          {
+            var r = Math.Log(mid / leadPrevEsPx);
+            if (Math.Abs(r) < 0.01) leadService.UpdateX(leadPrevEsT, t, r);
+          }
+          leadPrevEsPx = mid; leadPrevEsT = t;
+        }
+        else
+        {
+          if (!double.IsNaN(leadPrevNqPx) && t > leadPrevNqT)
+          {
+            var r = Math.Log(mid / leadPrevNqPx);
+            if (Math.Abs(r) < 0.01) leadService.UpdateY(leadPrevNqT, t, r);
+          }
+          leadPrevNqPx = mid; leadPrevNqT = t;
+        }
+        leadService.Trim(t);
+        if (t - leadLastLogT >= 5L * 60 * 1000000000L && leadService.IsReady)
+        {
+          leadLastLogT = t;
+          var sb = new System.Text.StringBuilder();
+          sb.Append($"LEADLAG t={t} ");
+          foreach (var lag in leadLagsNs)
+          {
+            var c = leadService.Correlation(lag);
+            sb.Append($"lag{lag/1000000000.0:+0.0;-0.0}s={(c.HasValue ? c.Value.ToString("F3") : "n/a")} ");
+          }
+          Console.WriteLine(sb.ToString());
+        }
+      }
 
-        await Adapter.Disconnect();
+      // Lead-lag follower: trade ES on NQ impulse
+      var q = sym == "NQ" ? llNqQ : (sym == "ES" ? llEsQ : null);
+      if (q != null)
+      {
+        q.Enqueue((t, mid));
+        while (q.Count > 0 && q.Peek().t < t - 1_000_000_000L) q.Dequeue(); // keep 1s
+
+        if (sym == "NQ" && llPos == 0 && llNqQ.Count >= 2 && llEsQ.Count >= 2)
+        {
+          // NQ impulse: price change over last 500ms
+          var nqOld = llNqQ.Peek(); // oldest in 1s window, approx 500ms+ ago
+          // Find price ~500ms ago
+          double nqRef = nqOld.px;
+          foreach (var (qt, qpx) in llNqQ) { if (qt >= t - LlWindowNs) { nqRef = qpx; break; } }
+          var nqMoveTicks = (mid - nqRef) / 0.25;
+
+          // ES move over same window
+          double esRef = llEsQ.Peek().px;
+          double esNow = mid; // current ES mid (from lead-lag block, but sym==NQ here, so use last ES)
+          // Get last ES price
+          var esLast = 0.0; var esLastT = 0L;
+          foreach (var (qt, qpx) in llEsQ) { esLast = qpx; esLastT = qt; }
+          double esRef2 = esLast;
+          foreach (var (qt, qpx) in llEsQ) { if (qt >= t - LlWindowNs) { esRef2 = qpx; break; } }
+          var esMoveTicks = (esLast - esRef2) / 0.25;
+
+          if (Math.Abs(nqMoveTicks) >= LlNqImpulseTicks && Math.Abs(esMoveTicks) < LlEsQuietTicks)
+          {
+            var dir = nqMoveTicks > 0 ? 1 : -1;
+            llPos = dir;
+            llEntryPx = esLast;
+            llEntryT = t;
+            var side = dir > 0 ? OrderSideEnum.Long : OrderSideEnum.Short;
+            _ = OpenPosition(adapter, Instruments["ES"], side, 1);
+          }
+        }
+
+        // Exit logic (on ES ticks)
+        if (sym == "ES" && llPos != 0)
+        {
+          var pnlTicks = (mid - llEntryPx) / 0.25 * llPos;
+          var timedOut = t - llEntryT >= LlTimeoutNs;
+          if (pnlTicks >= LlTpTicks || pnlTicks <= -LlSlTicks || timedOut)
+          {
+            llPos = 0;
+            _ = ClosePosition(adapter);
+          }
+        }
+      }
+
+      // 3-hour test cutoff
+      if (llFirstT == 0) llFirstT = t;
+      if (t - llFirstT >= LlTestNs)
+      {
+        _ = Task.Run(() => FinalizeAsync());
         return;
       }
+      var etSod = TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(t / 1000000L), EtZone).TimeOfDay.TotalSeconds;
+      var mrNight = etSod >= 18 * 3600 || etSod < 9.5 * 3600; // entries 18:00 -> 09:30 ET
+      var mrHalt = etSod >= 16 * 3600 && etSod < 18 * 3600;   // 16:00-18:00 ET clearing halt
 
-      var price = instrument.Price;
-      var index = price.Time.Value;
-      var adapter = Adapter;
-      var account = adapter.Account;
-      var asset = account.Instruments[symName];
-      var orders = (await adapter.GetOrders(default)).Data;
-      var positions = (await adapter.GetPositions(default)).Data;
-
-      var spanDay = SpanDay.Update(price);
-      var spanMin = SpanMin.Update(price);
-      var spanHour = SpanHour.Update(price);
-
-      var isMinLong = spanMin.Bar.Close > spanMin.Bar.Open;
-      var isMinShort = spanMin.Bar.Close < spanMin.Bar.Open;
-      var isDayLong = spanDay.Bar.Close > spanDay.Bar.Open;
-      var isDayShort = spanDay.Bar.Close < spanDay.Bar.Open;
-      var isHourLong = spanHour.Bar.Close > spanHour.Bar.Open;
-      var isHourShort = spanHour.Bar.Close < spanHour.Bar.Open;
-      var isLong = isMinLong && isHourLong && isDayLong;
-      var isShort = isMinShort && isHourShort && isDayShort;
-
-      if (positions.Count is 0)
+      mrWindow.Enqueue((t, mid)); mrSum += mid; mrSumSq += mid * mid;
+      while (mrWindow.Count > 0 && mrWindow.Peek().t < t - MrWindowNs)
       {
-        switch (true)
-        {
-          case true when isLong:
-            PosDirection = 1;
-            await OpenPosition(adapter, Instruments[symName], OrderSideEnum.Long);
-            break;
-
-          case true when isShort:
-            PosDirection = -1;
-            await OpenPosition(adapter, Instruments[symName], OrderSideEnum.Short);
-            break;
-        }
+        var o = mrWindow.Dequeue(); mrSum -= o.m; mrSumSq -= o.m * o.m;
       }
 
-      if (positions.Count is not 0)
+      // OU 1-min bars
+      var barMin = t / 60000000000L;
+      if (barMin != ouLastBarMin)
       {
-        var closeLong = PosDirection > 0 && isHourShort;
-        var closeShort = PosDirection < 0 && isHourLong;
-
-        if (closeLong || closeShort)
+        if (ouLastBarMin >= 0 && ouBarN > 0)
         {
-          await ClosePosition(adapter);
+          ouBars.Add((ouLastBarMin * 60.0, ouBarSum / ouBarN));
+          if (ouBars.Count > 60) ouBars.RemoveAt(0);
         }
+        ouLastBarMin = barMin; ouBarSum = mid; ouBarN = 1;
+      }
+      else { ouBarSum += mid; ouBarN++; }
+
+      // OU refit every 15 min
+      if (t - ouLastRefitNs >= OuRefitNs && ouBars.Count >= 60)
+      {
+        ouLastRefitNs = t;
+        try
+        {
+          var op = OrnsteinUhlenbeck.Fit(ouBars);
+          var tpPts = MrTpTicks * MrTickSize;
+          var slPts = MrSlTicks * MrTickSize;
+          var costPts = MrTickSize + 2 * (1.0 / 12.50 * MrTickSize);
+          var ed = OrnsteinUhlenbeck.OptimalEntryDistance(op, tpPts, slPts, costPts);
+          if (ed > 0)
+          {
+            var prevMu = ouMu;
+            ouMu = op.Mu;
+            ouEntryDist = ed;
+            var entryPx = op.Mu - ed;
+            var winP = OrnsteinUhlenbeck.HitProbability(op, entryPx, entryPx + tpPts, entryPx - slPts);
+            var avgWin = MrTpTicks * 12.50 - 2 * 1.0;
+            var avgLoss = MrSlTicks * 12.50 + 2 * 1.0;
+            ouContracts = 1; // fixed 1 lot, Kelly removed
+            if (double.IsNaN(prevMu)) { mrHaveBand = false; }
+          }
+        }
+        catch { }
+      }
+
+      if (mrWindow.Count >= 120)
+      {
+        var n = (double)mrWindow.Count;
+        var mean = mrSum / n;
+        var variance = mrSumSq / n - mean * mean;
+        if (variance < 0) variance = 0;
+        var sd = Math.Sqrt(variance);
+        // Fixed 1.5-sigma entry (Python shootout: 1.5σ outperformed 2.0σ on same history)
+        const double EntrySigmaMult = 1.5;
+        var lo = mean - EntrySigmaMult * sd;
+        var hi = mean + EntrySigmaMult * sd;
+
+        if (mrPos == 0 && mrHaveBand && mrNight)
+        {
+          if (mid < lo)
+          {
+            mrPos = 1; mrEntry = ask;
+            await OpenPosition(adapter, Instruments[symName], OrderSideEnum.Long, ouContracts);
+          }
+          else if (mid > hi)
+          {
+            mrPos = -1; mrEntry = bid;
+            await OpenPosition(adapter, Instruments[symName], OrderSideEnum.Short, ouContracts);
+          }
+        }
+        else if (mrPos == 1)
+        {
+          if (mrHalt)
+          {
+            mrPos = 0;
+            await ClosePosition(adapter);
+          }
+          else if (bid <= mrEntry - MrSlTicks * MrTickSize || bid >= mrEntry + MrTpTicks * MrTickSize)
+          {
+            mrPos = 0;
+            await ClosePosition(adapter);
+          }
+        }
+        else if (mrPos == -1)
+        {
+          if (mrHalt)
+          {
+            mrPos = 0;
+            await ClosePosition(adapter);
+          }
+          else if (ask >= mrEntry + MrSlTicks * MrTickSize || ask <= mrEntry - MrTpTicks * MrTickSize)
+          {
+            mrPos = 0;
+            await ClosePosition(adapter);
+          }
+        }
+
+        mrPrevMid = mid; mrPrevLo = lo; mrPrevHi = hi; mrHaveBand = true;
       }
     }
 
@@ -322,6 +566,30 @@ namespace Runner
       }
 
       return response;
+    }
+
+    /// <summary>
+    /// Completed transactions ordered by close time
+    /// </summary>
+    /// <param name="adapters"></param>
+    public virtual async Task<IList<object>> GetTransactionLog(params IGateway[] adapters)
+    {
+      var actionResponses = await Task.WhenAll(adapters.Select(o => o.GetTransactions(default)));
+      return actionResponses
+        .SelectMany(o => o.Data)
+        .Where(o => o?.Operation?.Time is not null)
+        .OrderBy(o => o.Operation.Time)
+        .Select(o => (object)new
+        {
+          Time = new DateTime(o.Operation.Time.Value),
+          Side = o.Side?.ToString(),
+          Amount = o.Operation.Amount,
+          EntryPrice = o.Operation.AveragePrice,
+          ExitPrice = o.Operation.Price,
+          Profit = o.Balance.Current,
+          Commission = o.Operation.Instrument?.Commission
+        })
+        .ToList();
     }
 
     /// <summary>
