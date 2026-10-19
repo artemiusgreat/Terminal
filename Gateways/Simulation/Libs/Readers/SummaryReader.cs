@@ -11,7 +11,8 @@ namespace Simulation.Readers
   public enum SummaryReaderEnum
   {
     Lite,
-    Fixed
+    Fixed,
+    Variable
   }
 
   /// <summary>
@@ -42,13 +43,14 @@ namespace Simulation.Readers
   {
     /// <summary>
     /// Creates a reader for the given instrument, source is the data directory.
-    /// ({name}.db for LiteDB, {name}.ticks + {name}.var for memory-mapped binary).
+    /// ({name}.db for LiteDB, {name}.ticks for fixed, {name}.vars for variable).
     /// </summary>
     public static ISummaryReader Create(SummaryReaderEnum reader, string source, string name)
     {
       switch (reader)
       {
         case SummaryReaderEnum.Fixed: return new FixedSummaryReader(source, name);
+        case SummaryReaderEnum.Variable: return new VariableSummaryReader(source, name);
         case SummaryReaderEnum.Lite: return new LiteSummaryReader(Path.Combine(source, $"{name}.db"), name);
       };
 
