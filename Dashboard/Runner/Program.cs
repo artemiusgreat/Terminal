@@ -25,6 +25,13 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Runner.Strategies.ConnorsPctB;
+using Runner.Strategies.KeltnerMr;
+using Runner.Strategies.LeadLag;
+using Runner.Strategies.Ou;
+using Runner.Strategies.Supertrend;
+using Runner.Strategies.TsMomentum;
+using Runner.Strategies.WilliamsR;
 
 namespace Runner
 {
@@ -69,6 +76,9 @@ namespace Runner
         });
       });
 
+      builder.Services.AddSingleton<StrategyContext>();
+      // <-- SWITCH STRATEGY HERE: one line selects the active strategy
+      builder.Services.AddSingleton<IStrategy, ConnorsPctBStrategy>();
       builder.Services.AddSingleton<Strategy>();
       builder.Services.AddSingleton<StateService>();
       builder.Services.AddSingleton<SchedulerService>();
@@ -84,7 +94,7 @@ namespace Runner
     }
   }
 
-  public class Strategy(IClusterClient connector, IConfiguration configuration, IHostApplicationLifetime lifetime)
+  public class Strategy(IClusterClient connector, IConfiguration configuration, IHostApplicationLifetime lifetime, IStrategy strategy, StrategyContext context)
   {
     protected virtual IClusterClient Connector { get; set; } = connector;
     protected virtual IConfiguration Configuration { get; set; } = configuration;
@@ -102,80 +112,12 @@ namespace Runner
     int Direction { get; set; }
     long endTime;
     int finalized;
-    // Mean-reversion: 2-sigma Bollinger fade. Grid-optimal region W=60m, SL=20t, TP=10t.
-    const long MrWindowNs = 60L * 60 * 1000000000L;
-    const double MrSlTicks = 20, MrTpTicks = 10, MrTickSize = 0.25;
-    // Night session only (ET): entries 18:00 -> 09:30, flat through 16:00-18:00 halt.
-    static readonly TimeZoneInfo EtZone = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
-    readonly Queue<(long t, double m)> mrWindow = new();
-    double mrSum, mrSumSq;
-    double mrPrevMid = double.NaN, mrPrevLo = double.NaN, mrPrevHi = double.NaN;
-    bool mrHaveBand;
-    int mrPos;
-    double mrEntry;
-    // OU-derived entry/sizing: 1-min bars -> OU fit every 15 min -> OptimalEntryDistance + Kelly.
-    readonly List<(double tSeconds, double x)> ouBars = new();
-    long ouLastBarMin = -1;
-    double ouBarSum;
-    int ouBarN;
-    long ouLastRefitNs;
-    double ouMu = double.NaN;
-    double ouEntryDist;
-    double ouContracts = 1;
-    const double OuBankroll = 100_000;
-    const int OuMaxContracts = 10;
-    const long OuRefitNs = 15L * 60 * 1000000000L;
 
-    // Connors %B (Python round2 s_pctb): %B(20,2) on 1-min closes.
-    // Long-only: enter when %B crosses below 0, exit when %B > 0.5 or 10 bars max.
-    const int CpbPeriod = 20;
-    const double CpbMult = 2.0;
-    const double CpbExitLevel = 0.5;
-    const int CpbMaxBars = 10;
-    readonly List<double> cpbCloses = new();
-    long cpbLastBarMin = -1;
-    double cpbBarSum;
-    int cpbBarN;
-    double cpbPrevPctB = double.NaN;
-    int cpbPos;       // 0 flat, 1 long
-    int cpbBarsHeld;
-    long cpbFirstT;       // first tick time for 1-day test cutoff
-    const long CpbTestNs = 24L * 60 * 60 * 1000000000L; // 1 day
-
-    // Lead-lag measurement (Hayashi-Yoshida)
-    readonly LeadService leadService = new LeadService(5L * 60 * 1000000000L); // 5-min frame
-    double leadPrevEsPx = double.NaN, leadPrevNqPx = double.NaN;
-    long leadPrevEsT = 0, leadPrevNqT = 0;
-    long leadLastLogT = 0;
-    static readonly long[] leadLagsNs = new long[] {
-      -10_000_000_000L, -5_000_000_000L, -2_000_000_000L, -1_000_000_000L, -500_000_000L,
-      0,
-      500_000_000L, 1_000_000_000L, 2_000_000_000L, 5_000_000_000L, 10_000_000_000L
-    };
-
-    // Lead-lag follower strategy: NQ leads ES by ~0.5s
-    // Entry: NQ impulse >= 6 ticks in 500ms, ES < 2 ticks (hasn't reacted) -> trade ES in NQ direction
-    // Exit: ES catches up (+3 ticks TP), -3 ticks SL, or 2s timeout
-    const long LlWindowNs = 500_000_000L; // 500ms impulse window
-    const double LlNqImpulseTicks = 6;    // NQ must move >= 6 ticks
-    const double LlEsQuietTicks = 2;      // ES must move < 2 ticks (hasn't reacted)
-    const double LlTpTicks = 3, LlSlTicks = 3;
-    const long LlTimeoutNs = 2_000_000_000L; // 2s
-    readonly Queue<(long t, double px)> llNqQ = new(), llEsQ = new();
-    int llPos = 0; // +1 long ES, -1 short ES, 0 flat
-    double llEntryPx = 0;
-    long llEntryT = 0;
-    long llFirstT = 0;
-    const long LlTestNs = 3L * 60 * 60 * 1000000000L; // 3-hour test window
-
-    const string symName = "ES";
-
-    // Strategy selector: "OU" (committed baseline), "ConnorsPctB" (Python round2 s_pctb).
-    const string ActiveStrategy = "ConnorsPctB";
+    const double TickSize = 0.25;
 
     Dictionary<string, Instrument> Instruments = new()
     {
-      [symName] = new() { Name = symName, Leverage = 50, Commission = 1.0, StepSize = 0.25 },
+      ["ES"] = new() { Name = "ES", Leverage = 50, Commission = 1.0, StepSize = 0.25 },
       ["NQ"] = new() { Name = "NQ", Leverage = 20, Commission = 1.0, StepSize = 0.25 },
     };
 
@@ -223,6 +165,14 @@ namespace Runner
         return Task.CompletedTask;
       };
 
+      // Wire the strategy context now that the gateway exists.
+      context.GetAdapter = () => Adapter;
+      context.Instruments = Instruments;
+      context.RequestShutdownAsync = () =>
+      {
+        _ = Task.Run(() => FinalizeAsync());
+        return Task.CompletedTask;
+      };
     }
 
     async Task FinalizeAsync()
@@ -246,416 +196,12 @@ namespace Runner
     public async Task OnTick(Instrument instrument)
     {
       var price = instrument.Price;
-      var adapter = Adapter;
       var bid = price.Bid ?? double.NaN;
       var ask = price.Ask ?? double.NaN;
       if (double.IsNaN(bid) || double.IsNaN(ask)) return;
-      if ((ask - bid) / MrTickSize > 3) return; // skip insane quotes (see tick study)
+      if ((ask - bid) / TickSize > 3) return; // skip insane quotes (see tick study)
       var mid = (bid + ask) / 2;
-      var t = price.Time.Value;
-
-      // Lead-lag: feed log returns into Hayashi-Yoshida estimator
-      var sym = instrument.Name;
-      if (sym == "ES" || sym == "NQ")
-      {
-        if (sym == "ES")
-        {
-          if (!double.IsNaN(leadPrevEsPx) && t > leadPrevEsT)
-          {
-            var r = Math.Log(mid / leadPrevEsPx);
-            if (Math.Abs(r) < 0.01) leadService.UpdateX(leadPrevEsT, t, r);
-          }
-          leadPrevEsPx = mid; leadPrevEsT = t;
-        }
-        else
-        {
-          if (!double.IsNaN(leadPrevNqPx) && t > leadPrevNqT)
-          {
-            var r = Math.Log(mid / leadPrevNqPx);
-            if (Math.Abs(r) < 0.01) leadService.UpdateY(leadPrevNqT, t, r);
-          }
-          leadPrevNqPx = mid; leadPrevNqT = t;
-        }
-        leadService.Trim(t);
-        if (t - leadLastLogT >= 5L * 60 * 1000000000L && leadService.IsReady)
-        {
-          leadLastLogT = t;
-          var sb = new System.Text.StringBuilder();
-          sb.Append($"LEADLAG t={t} ");
-          foreach (var lag in leadLagsNs)
-          {
-            var c = leadService.Correlation(lag);
-            sb.Append($"lag{lag/1000000000.0:+0.0;-0.0}s={(c.HasValue ? c.Value.ToString("F3") : "n/a")} ");
-          }
-          Console.WriteLine(sb.ToString());
-        }
-      }
-
-      // Lead-lag follower: trade ES on NQ impulse
-      var q = sym == "NQ" ? llNqQ : (sym == "ES" ? llEsQ : null);
-      if (q != null)
-      {
-        q.Enqueue((t, mid));
-        while (q.Count > 0 && q.Peek().t < t - 1_000_000_000L) q.Dequeue(); // keep 1s
-
-        if (sym == "NQ" && llPos == 0 && llNqQ.Count >= 2 && llEsQ.Count >= 2)
-        {
-          // NQ impulse: price change over last 500ms
-          var nqOld = llNqQ.Peek(); // oldest in 1s window, approx 500ms+ ago
-          // Find price ~500ms ago
-          double nqRef = nqOld.px;
-          foreach (var (qt, qpx) in llNqQ) { if (qt >= t - LlWindowNs) { nqRef = qpx; break; } }
-          var nqMoveTicks = (mid - nqRef) / 0.25;
-
-          // ES move over same window
-          double esRef = llEsQ.Peek().px;
-          double esNow = mid; // current ES mid (from lead-lag block, but sym==NQ here, so use last ES)
-          // Get last ES price
-          var esLast = 0.0; var esLastT = 0L;
-          foreach (var (qt, qpx) in llEsQ) { esLast = qpx; esLastT = qt; }
-          double esRef2 = esLast;
-          foreach (var (qt, qpx) in llEsQ) { if (qt >= t - LlWindowNs) { esRef2 = qpx; break; } }
-          var esMoveTicks = (esLast - esRef2) / 0.25;
-
-          if (Math.Abs(nqMoveTicks) >= LlNqImpulseTicks && Math.Abs(esMoveTicks) < LlEsQuietTicks)
-          {
-            var dir = nqMoveTicks > 0 ? 1 : -1;
-            llPos = dir;
-            llEntryPx = esLast;
-            llEntryT = t;
-            var side = dir > 0 ? OrderSideEnum.Long : OrderSideEnum.Short;
-            _ = OpenPosition(adapter, Instruments["ES"], side, 1);
-          }
-        }
-
-        // Exit logic (on ES ticks)
-        if (sym == "ES" && llPos != 0)
-        {
-          var pnlTicks = (mid - llEntryPx) / 0.25 * llPos;
-          var timedOut = t - llEntryT >= LlTimeoutNs;
-          if (pnlTicks >= LlTpTicks || pnlTicks <= -LlSlTicks || timedOut)
-          {
-            llPos = 0;
-            _ = ClosePosition(adapter);
-          }
-        }
-      }
-
-      // 3-hour test cutoff (lead-lag strategy only)
-      if (ActiveStrategy == "LeadLag")
-      {
-        if (llFirstT == 0) llFirstT = t;
-        if (t - llFirstT >= LlTestNs)
-        {
-          _ = Task.Run(() => FinalizeAsync());
-          return;
-        }
-      }
-      if (ActiveStrategy == "OU")
-      {
-      var etSod = TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(t / 1000000L), EtZone).TimeOfDay.TotalSeconds;
-      var mrNight = etSod >= 18 * 3600 || etSod < 9.5 * 3600; // entries 18:00 -> 09:30 ET
-      var mrHalt = etSod >= 16 * 3600 && etSod < 18 * 3600;   // 16:00-18:00 ET clearing halt
-
-      mrWindow.Enqueue((t, mid)); mrSum += mid; mrSumSq += mid * mid;
-      while (mrWindow.Count > 0 && mrWindow.Peek().t < t - MrWindowNs)
-      {
-        var o = mrWindow.Dequeue(); mrSum -= o.m; mrSumSq -= o.m * o.m;
-      }
-
-      // OU 1-min bars
-      var barMin = t / 60000000000L;
-      if (barMin != ouLastBarMin)
-      {
-        if (ouLastBarMin >= 0 && ouBarN > 0)
-        {
-          ouBars.Add((ouLastBarMin * 60.0, ouBarSum / ouBarN));
-          if (ouBars.Count > 60) ouBars.RemoveAt(0);
-        }
-        ouLastBarMin = barMin; ouBarSum = mid; ouBarN = 1;
-      }
-      else { ouBarSum += mid; ouBarN++; }
-
-      // OU refit every 15 min
-      if (t - ouLastRefitNs >= OuRefitNs && ouBars.Count >= 60)
-      {
-        ouLastRefitNs = t;
-        try
-        {
-          var op = OrnsteinUhlenbeck.Fit(ouBars);
-          var tpPts = MrTpTicks * MrTickSize;
-          var slPts = MrSlTicks * MrTickSize;
-          var costPts = MrTickSize + 2 * (1.0 / 12.50 * MrTickSize);
-          var ed = OrnsteinUhlenbeck.OptimalEntryDistance(op, tpPts, slPts, costPts);
-          if (ed > 0)
-          {
-            var prevMu = ouMu;
-            ouMu = op.Mu;
-            ouEntryDist = ed;
-            var entryPx = op.Mu - ed;
-            var winP = OrnsteinUhlenbeck.HitProbability(op, entryPx, entryPx + tpPts, entryPx - slPts);
-            var avgWin = MrTpTicks * 12.50 - 2 * 1.0;
-            var avgLoss = MrSlTicks * 12.50 + 2 * 1.0;
-            ouContracts = 1; // fixed 1 lot, Kelly removed
-            if (double.IsNaN(prevMu)) { mrHaveBand = false; }
-          }
-        }
-        catch { }
-      }
-
-      if (mrWindow.Count >= 120)
-      {
-        var n = (double)mrWindow.Count;
-        var mean = mrSum / n;
-        var variance = mrSumSq / n - mean * mean;
-        if (variance < 0) variance = 0;
-        var sd = Math.Sqrt(variance);
-        // Fixed 1.5-sigma entry (Python shootout: 1.5σ outperformed 2.0σ on same history)
-        const double EntrySigmaMult = 1.5;
-        var lo = mean - EntrySigmaMult * sd;
-        var hi = mean + EntrySigmaMult * sd;
-
-        if (mrPos == 0 && mrHaveBand && mrNight)
-        {
-          if (mid < lo)
-          {
-            mrPos = 1; mrEntry = ask;
-            await OpenPosition(adapter, Instruments[symName], OrderSideEnum.Long, ouContracts);
-          }
-          else if (mid > hi)
-          {
-            mrPos = -1; mrEntry = bid;
-            await OpenPosition(adapter, Instruments[symName], OrderSideEnum.Short, ouContracts);
-          }
-        }
-        else if (mrPos == 1)
-        {
-          if (mrHalt)
-          {
-            mrPos = 0;
-            await ClosePosition(adapter);
-          }
-          else if (bid <= mrEntry - MrSlTicks * MrTickSize || bid >= mrEntry + MrTpTicks * MrTickSize)
-          {
-            mrPos = 0;
-            await ClosePosition(adapter);
-          }
-        }
-        else if (mrPos == -1)
-        {
-          if (mrHalt)
-          {
-            mrPos = 0;
-            await ClosePosition(adapter);
-          }
-          else if (ask >= mrEntry + MrSlTicks * MrTickSize || ask <= mrEntry - MrTpTicks * MrTickSize)
-          {
-            mrPos = 0;
-            await ClosePosition(adapter);
-          }
-        }
-
-        mrPrevMid = mid; mrPrevLo = lo; mrPrevHi = hi; mrHaveBand = true;
-      }
-      }
-
-      else if (ActiveStrategy == "ConnorsPctB" && sym == "ES")
-      {
-        // 1-day test cutoff
-        if (cpbFirstT == 0) cpbFirstT = t;
-        if (t - cpbFirstT >= CpbTestNs)
-        {
-          if (cpbPos != 0) { cpbPos = 0; await ClosePosition(adapter); }
-          _ = Task.Run(() => FinalizeAsync());
-          return;
-        }
-        // Build 1-min bars from tick mids
-        var cpbBarMin = t / 60000000000L;
-        if (cpbBarMin != cpbLastBarMin)
-        {
-          if (cpbLastBarMin >= 0 && cpbBarN > 0)
-          {
-            cpbCloses.Add(cpbBarSum / cpbBarN);
-            if (cpbCloses.Count > 40) cpbCloses.RemoveAt(0);
-
-            if (cpbCloses.Count >= CpbPeriod)
-            {
-              var pctB = ComputePctB(cpbCloses, CpbPeriod, CpbMult);
-
-              if (cpbPos == 0 && !double.IsNaN(cpbPrevPctB) && cpbPrevPctB >= 0 && pctB < 0)
-              {
-                // %B crossed below 0: price broke through lower band -> long
-                cpbPos = 1; cpbBarsHeld = 0;
-                await OpenPosition(adapter, Instruments[symName], OrderSideEnum.Long, 1);
-              }
-              else if (cpbPos == 1)
-              {
-                cpbBarsHeld++;
-                if (pctB > CpbExitLevel || cpbBarsHeld >= CpbMaxBars)
-                {
-                  cpbPos = 0;
-                  await ClosePosition(adapter);
-                }
-              }
-              cpbPrevPctB = pctB;
-            }
-          }
-          cpbLastBarMin = cpbBarMin; cpbBarSum = mid; cpbBarN = 1;
-        }
-        else { cpbBarSum += mid; cpbBarN++; }
-      }
-    }
-
-    /// <summary>
-    /// Connors %B: (close - lower band) / (upper - lower), Bollinger(period, mult).
-    /// </summary>
-    static double ComputePctB(System.Collections.Generic.List<double> closes, int period, double mult)
-    {
-      int n = closes.Count;
-      double sum = 0;
-      for (int i = n - period; i < n; i++) sum += closes[i];
-      double mean = sum / period;
-      double var = 0;
-      for (int i = n - period; i < n; i++) { var += (closes[i] - mean) * (closes[i] - mean); }
-      double sd = Math.Sqrt(var / period);
-      double upper = mean + mult * sd;
-      double lower = mean - mult * sd;
-      double range = upper - lower;
-      if (range <= 0) return 0.5;
-      return (closes[n - 1] - lower) / range;
-    }
-
-    /// <summary>
-    /// SL price
-    /// </summary>
-    /// <param name="side"></param>
-    /// <param name="price"></param>
-    /// <param name="distance"></param>
-    protected virtual double? SL(OrderSideEnum side, Price price, double distance)
-    {
-      switch (side)
-      {
-        case OrderSideEnum.Long: return price.Bid - distance;
-        case OrderSideEnum.Short: return price.Ask + distance;
-      }
-
-      return null;
-    }
-
-    /// <summary>
-    /// TP price
-    /// </summary>
-    /// <param name="side"></param>
-    /// <param name="price"></param>
-    /// <param name="distance"></param>
-    protected virtual double? TP(OrderSideEnum side, Price price, double distance)
-    {
-      switch (side)
-      {
-        case OrderSideEnum.Long: return price.Ask + distance;
-        case OrderSideEnum.Short: return price.Bid - distance;
-      }
-
-      return null;
-    }
-
-    /// <summary>
-    /// Open position
-    /// </summary>
-    /// <param name="adapter"></param>
-    /// <param name="asset"></param>
-    /// <param name="side"></param>
-    /// <param name="amount"></param>
-    /// <param name="SL"></param>
-    /// <param name="TP"></param>
-    protected virtual async Task OpenPosition(
-      IGateway adapter,
-      Instrument asset,
-      OrderSideEnum side,
-      double amount = 1,
-      double? SL = null,
-      double? TP = null)
-    {
-      var order = new Order
-      {
-        Side = side,
-        Amount = amount,
-        Type = OrderTypeEnum.Market,
-        Operation = new() { Instrument = asset }
-      };
-
-      if (SL is not null)
-      {
-        order = order with
-        {
-          Orders = [..order.Orders,
-            new()
-            {
-              Price = SL,
-              Amount = amount,
-              Type = OrderTypeEnum.Stop,
-              Instruction = InstructionEnum.Brace,
-              Side = side is OrderSideEnum.Long ? OrderSideEnum.Short : OrderSideEnum.Long,
-              Operation = new() { Instrument = asset }
-            }
-          ]
-        };
-      }
-
-      if (TP is not null)
-      {
-        order = order with
-        {
-          Orders = [..order.Orders,
-            new()
-            {
-              Price = TP,
-              Amount = amount,
-              Type = OrderTypeEnum.Limit,
-              Instruction = InstructionEnum.Brace,
-              Side = side is OrderSideEnum.Long ? OrderSideEnum.Short : OrderSideEnum.Long,
-              Operation = new() { Instrument = asset }
-            }
-          ]
-        };
-      }
-
-      await adapter.SendOrder(order);
-    }
-
-    /// <summary>
-    /// Close positions
-    /// </summary>
-    /// <param name="adapter"></param>
-    /// <param name="criteria"></param>
-    /// <param name="condition"></param>
-    protected virtual async Task<List<Order>> ClosePosition(IGateway adapter, PositionCriteria criteria = null, Func<Order, bool> condition = null)
-    {
-      var response = new List<Order>();
-      var positions = await adapter.GetPositions(criteria ?? new() { Source = true });
-
-      foreach (var position in positions.Data)
-      {
-        if (condition is null || condition(position))
-        {
-          var order = new Order
-          {
-            Amount = position.Operation.Amount,
-            Side = position.Side is OrderSideEnum.Long ? OrderSideEnum.Short : OrderSideEnum.Long,
-            Type = OrderTypeEnum.Market,
-            Operation = new()
-            {
-              Instrument = position.Operation.Instrument
-            }
-          };
-
-          await adapter.SendOrder(order);
-
-          response.Add(order);
-        }
-      }
-
-      return response;
+      await strategy.OnTickAsync(new StrategyTick(instrument.Name, bid, ask, mid, price.Time.Value));
     }
 
     /// <summary>
