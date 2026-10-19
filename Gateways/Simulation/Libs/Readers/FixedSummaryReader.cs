@@ -9,15 +9,14 @@ namespace Simulation.Readers
   /// <summary>
   /// Memory-mapped ISummaryReader for fixed 48-byte tick records.
   ///
-  /// File: {name}.ticks — raw 48-byte records back-to-back, no header.
-  /// Record count is derived from file size (length / 48).
+  /// File: {name}.ticks — raw 64-byte records back-to-back, no header.
+  /// Record count is derived from file size (length / 64).
   ///
-  /// Fixed record (48 bytes):
-  ///   TimeNs(8) | BidTicks(4) | AskTicks(4) | TradeTicks(4) |
-  ///   BidSize(4) | AskSize(4) | TradeSize(4) |
-  ///   VarOffset(4) | VarLength(4) | Flags(4) | Reserved(4)
+  /// Fixed record (64 bytes):
+  ///   Time(8) | Bid(8) | Ask(8) | Last(8) | BidSize(8) | AskSize(8) |
+  ///   Volume(4) | VarOffset(4) | VarLength(4) | Flags(4)
   ///
-  /// Prices stored as int ticks (price × 10000). Flags bit 0 = HasVarData.
+  /// Flags bit 0 = HasVarData.
   /// VarOffset/VarLength point into the companion {name}.var file
   /// (read via VariableSummaryReader).
   ///
@@ -32,26 +31,22 @@ namespace Simulation.Readers
   [StructLayout(LayoutKind.Sequential, Pack = 1)]
   struct TickRecord
   {
-    public long TimeNs;     // offset 0
-    public int BidTicks;    // offset 8
-    public int AskTicks;    // offset 12
-    public int TradeTicks;  // offset 16
-    public int BidSize;     // offset 20
-    public int AskSize;     // offset 24
-    public int TradeSize;   // offset 28
-    public int VarOffset;   // offset 32 — byte offset into .var file
-    public int VarLength;   // offset 36 — blob length in .var file
-    public int Flags;       // offset 40
-    public int Reserved;    // offset 44
-  } // 48 bytes total
+    public long Time;       // offset 0
+    public double Bid;      // offset 8
+    public double Ask;      // offset 16
+    public double Last;     // offset 24
+    public double BidSize;  // offset 32
+    public double AskSize;  // offset 40
+    public int Volume;      // offset 48
+    public int VarOffset;   // offset 52 — byte offset into .var file
+    public int VarLength;   // offset 56 — blob length in .var file
+    public int Flags;       // offset 60
+  } // 64 bytes total
 
   public class FixedSummaryReader : ISummaryReader
   {
-    public const int RecordSize = 48;
+    static readonly int RecordSize = Marshal.SizeOf<TickRecord>();
     const int FlagHasVarData = 1;
-
-    // 10_000x multiplier for price->ticks conversion (4 decimal places)
-    const double PriceScale = 10000.0;
 
     public string Name { get; }
 
@@ -88,7 +83,7 @@ namespace Simulation.Readers
 
       var recordOffset = position * RecordSize;
 
-      // Direct struct copy from the mapped view — single 48-byte read.
+      // Direct struct copy from the mapped view — single 64-byte read.
       accessor.Read(recordOffset, out TickRecord rec);
 
       if ((rec.Flags & FlagHasVarData) is not 0 && rec.VarLength > 0 && varReader is not null)
@@ -101,15 +96,15 @@ namespace Simulation.Readers
         // Hot path: minimal Summary from fixed record (no deserialization)
         current = new Summary
         {
-          Time = rec.TimeNs,
+          Time = rec.Time,
           Instrument = new Instrument
           {
             Name = Name,
             Price = new Price
             {
-              Time = rec.TimeNs,
-              Bid = rec.BidTicks / PriceScale,
-              Ask = rec.AskTicks / PriceScale,
+              Time = rec.Time,
+              Bid = rec.Bid,
+              Ask = rec.Ask,
               BidSize = rec.BidSize,
               AskSize = rec.AskSize,
             }

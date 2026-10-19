@@ -13,13 +13,13 @@ namespace Simulation.Tools
   /// for FixedSummaryReader / VariableSummaryReader.
   ///
   /// Output:
-  ///   {instrument}.ticks — fixed 48-byte records back-to-back, no header.
-  ///                        Count = file size / 48.
+  ///   {instrument}.ticks — fixed 64-byte records back-to-back, no header.
+  ///                        Count = file size / 64.
   ///   {instrument}.var   — MessagePack blobs concatenated, no header.
   ///                        Offsets/lengths stored in the fixed record's
   ///                        VarOffset/VarLength fields (relative to .var start).
   ///
-  /// Fixed records carry Time + Bid/Ask/Trade (as int ticks ×10000) + sizes.
+  /// Fixed records carry Time + Bid/Ask/Last + BidSize/AskSize + Volume.
   /// Ticks with Dom/Order/Options get FlagHasVarData and a MessagePack blob
   /// in the .var file (rare). All other ticks are zero-copy reads.
   ///
@@ -28,9 +28,8 @@ namespace Simulation.Tools
   /// </summary>
   public static class TickFileConverter
   {
-    const double PriceScale = 10000.0;
     const int FlagHasVarData = 1;
-    const int RecordSize = 48;
+    const int RecordSize = 64;
 
     static readonly MessagePackSerializerOptions MsgPackOptions =
       ContractlessStandardResolver.Options;
@@ -46,7 +45,7 @@ namespace Simulation.Tools
       var tmpTicks = ticksPath + ".tmp";
       var tmpVar = varPath + ".tmp";
 
-      // Buffer fixed records in memory (48 bytes × N; ~96MB for 2M ticks/1 day ES).
+      // Buffer fixed records in memory (64 bytes × N; ~128MB for 2M ticks/1 day ES).
       // For larger conversions, spill to temp file.
       var fixedRecords = new List<byte[]>();
       var varBlobs = new List<byte[]>();
@@ -58,23 +57,21 @@ namespace Simulation.Tools
         var s = reader.Current;
         var rec = new byte[RecordSize];
 
-        var timeNs = s.Time;
+        var time = s.Time;
         var bid = s.Instrument?.Price?.Bid ?? 0;
         var ask = s.Instrument?.Price?.Ask ?? 0;
-        var bidSize = (int)(s.Instrument?.Price?.BidSize ?? 0);
-        var askSize = (int)(s.Instrument?.Price?.AskSize ?? 0);
+        var last = 0.0; // Trade price: not in Price model (reserved for future)
+        var bidSize = s.Instrument?.Price?.BidSize ?? 0;
+        var askSize = s.Instrument?.Price?.AskSize ?? 0;
+        var volume = 0; // Trade volume: not in Price model (reserved for future)
 
-        // Trade data: not in Price model; use 0 (reserved for future)
-        var tradeTicks = 0;
-        var tradeSize = 0;
-
-        BitConverter.GetBytes(timeNs).CopyTo(rec, 0);
-        BitConverter.GetBytes((int)(bid * PriceScale)).CopyTo(rec, 8);
-        BitConverter.GetBytes((int)(ask * PriceScale)).CopyTo(rec, 12);
-        BitConverter.GetBytes(tradeTicks).CopyTo(rec, 16);
-        BitConverter.GetBytes(bidSize).CopyTo(rec, 20);
-        BitConverter.GetBytes(askSize).CopyTo(rec, 24);
-        BitConverter.GetBytes(tradeSize).CopyTo(rec, 28);
+        BitConverter.GetBytes(time).CopyTo(rec, 0);
+        BitConverter.GetBytes(bid).CopyTo(rec, 8);
+        BitConverter.GetBytes(ask).CopyTo(rec, 16);
+        BitConverter.GetBytes(last).CopyTo(rec, 24);
+        BitConverter.GetBytes(bidSize).CopyTo(rec, 32);
+        BitConverter.GetBytes(askSize).CopyTo(rec, 40);
+        BitConverter.GetBytes(volume).CopyTo(rec, 48);
 
         // Check for variable data (Dom, Order, Options)
         var hasVar = s.Dom != null || s.Order != null ||
@@ -93,10 +90,9 @@ namespace Simulation.Tools
           flags |= FlagHasVarData;
         }
 
-        BitConverter.GetBytes(varOffset).CopyTo(rec, 32);
-        BitConverter.GetBytes(varLength).CopyTo(rec, 36);
-        BitConverter.GetBytes(flags).CopyTo(rec, 40);
-        // bytes 44-47: reserved (zero)
+        BitConverter.GetBytes(varOffset).CopyTo(rec, 52);
+        BitConverter.GetBytes(varLength).CopyTo(rec, 56);
+        BitConverter.GetBytes(flags).CopyTo(rec, 60);
 
         fixedRecords.Add(rec);
         count++;
