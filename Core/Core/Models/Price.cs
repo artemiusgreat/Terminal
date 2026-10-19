@@ -1,7 +1,9 @@
+using Orleans;
 using System;
 
 namespace Core.Models
 {
+  [Immutable]
   public record Price
   {
     /// <summary>

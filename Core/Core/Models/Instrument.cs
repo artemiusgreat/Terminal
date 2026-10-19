@@ -1,7 +1,9 @@
 using Core.Enums;
+using Orleans;
 
 namespace Core.Models
 {
+  [Immutable]
   public record Instrument
   {
     /// <summary>

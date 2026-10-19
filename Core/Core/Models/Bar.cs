@@ -1,5 +1,8 @@
+using Orleans;
+
 namespace Core.Models
 {
+  [Immutable]
   public record Bar
   {
     /// <summary>

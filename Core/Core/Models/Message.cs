@@ -1,8 +1,10 @@
 using Core.Enums;
+using Orleans;
 using System;
 
 namespace Core.Models
 {
+  [Immutable]
   public record Message
   {
     /// <summary>
