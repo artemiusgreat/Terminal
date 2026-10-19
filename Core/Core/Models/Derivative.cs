@@ -1,10 +1,8 @@
 using Core.Enums;
 using System;
-using MemoryPack;
 
 namespace Core.Models
 {
-  [MemoryPackable]
   public partial record Derivative
   {
     /// <summary>

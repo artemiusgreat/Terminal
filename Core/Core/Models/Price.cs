@@ -1,9 +1,7 @@
 using System;
-using MemoryPack;
 
 namespace Core.Models
 {
-  [MemoryPackable]
   public partial record Price
   {
     /// <summary>

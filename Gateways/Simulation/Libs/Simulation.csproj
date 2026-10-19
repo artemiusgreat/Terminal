@@ -8,7 +8,6 @@
 
   <ItemGroup>
     <PackageReference Include="LiteDB" Version="6.0.0-prerelease.292" />
-    <PackageReference Include="MemoryPack" Version="1.21.4" />
   </ItemGroup>
 
   <ItemGroup>

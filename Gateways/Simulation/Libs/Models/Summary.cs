@@ -1,10 +1,8 @@
 using Core.Models;
 using System.Collections.Generic;
-using MemoryPack;
 
 namespace Simulation.Models
 {
-  [MemoryPackable]
   public partial record Summary
   {
     /// <summary>

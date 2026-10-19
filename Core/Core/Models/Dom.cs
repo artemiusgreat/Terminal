@@ -1,9 +1,7 @@
 using System.Collections.Generic;
-using MemoryPack;
 
 namespace Core.Models
 {
-  [MemoryPackable]
   public partial record Dom
   {
     /// <summary>

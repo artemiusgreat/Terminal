@@ -1,8 +1,6 @@
-using MemoryPack;
 namespace Core.Models
 {
   // MemoryPack usings via global
-  [MemoryPackable]
   public partial record Variance
   {
     /// <summary>

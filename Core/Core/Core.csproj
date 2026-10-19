@@ -10,7 +10,6 @@
   <ItemGroup>
     <PackageReference Include="Estimator" Version="1.1.7" />
     <PackageReference Include="FluentValidation" Version="12.1.1" />
-    <PackageReference Include="MemoryPack" Version="1.21.4" />
     <PackageReference Include="Microsoft.Orleans.Sdk" Version="10.3.1" />
     <PackageReference Include="Microsoft.Orleans.Serialization.MessagePack" Version="10.3.1" />
     <PackageReference Include="Microsoft.Orleans.Streaming" Version="10.3.1" />
