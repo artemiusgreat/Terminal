@@ -126,6 +126,22 @@ namespace Runner
     const int OuMaxContracts = 10;
     const long OuRefitNs = 15L * 60 * 1000000000L;
 
+    // Connors %B (Python round2 s_pctb): %B(20,2) on 1-min closes.
+    // Long-only: enter when %B crosses below 0, exit when %B > 0.5 or 10 bars max.
+    const int CpbPeriod = 20;
+    const double CpbMult = 2.0;
+    const double CpbExitLevel = 0.5;
+    const int CpbMaxBars = 10;
+    readonly List<double> cpbCloses = new();
+    long cpbLastBarMin = -1;
+    double cpbBarSum;
+    int cpbBarN;
+    double cpbPrevPctB = double.NaN;
+    int cpbPos;       // 0 flat, 1 long
+    int cpbBarsHeld;
+    long cpbFirstT;       // first tick time for 1-day test cutoff
+    const long CpbTestNs = 24L * 60 * 60 * 1000000000L; // 1 day
+
     // Lead-lag measurement (Hayashi-Yoshida)
     readonly LeadService leadService = new LeadService(5L * 60 * 1000000000L); // 5-min frame
     double leadPrevEsPx = double.NaN, leadPrevNqPx = double.NaN;
@@ -153,6 +169,9 @@ namespace Runner
     const long LlTestNs = 3L * 60 * 60 * 1000000000L; // 3-hour test window
 
     const string symName = "ES";
+
+    // Strategy selector: "OU" (committed baseline), "ConnorsPctB" (Python round2 s_pctb).
+    const string ActiveStrategy = "ConnorsPctB";
 
     Dictionary<string, Instrument> Instruments = new()
     {
@@ -322,13 +341,18 @@ namespace Runner
         }
       }
 
-      // 3-hour test cutoff
-      if (llFirstT == 0) llFirstT = t;
-      if (t - llFirstT >= LlTestNs)
+      // 3-hour test cutoff (lead-lag strategy only)
+      if (ActiveStrategy == "LeadLag")
       {
-        _ = Task.Run(() => FinalizeAsync());
-        return;
+        if (llFirstT == 0) llFirstT = t;
+        if (t - llFirstT >= LlTestNs)
+        {
+          _ = Task.Run(() => FinalizeAsync());
+          return;
+        }
       }
+      if (ActiveStrategy == "OU")
+      {
       var etSod = TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(t / 1000000L), EtZone).TimeOfDay.TotalSeconds;
       var mrNight = etSod >= 18 * 3600 || etSod < 9.5 * 3600; // entries 18:00 -> 09:30 ET
       var mrHalt = etSod >= 16 * 3600 && etSod < 18 * 3600;   // 16:00-18:00 ET clearing halt
@@ -433,6 +457,72 @@ namespace Runner
 
         mrPrevMid = mid; mrPrevLo = lo; mrPrevHi = hi; mrHaveBand = true;
       }
+      }
+
+      else if (ActiveStrategy == "ConnorsPctB" && sym == "ES")
+      {
+        // 1-day test cutoff
+        if (cpbFirstT == 0) cpbFirstT = t;
+        if (t - cpbFirstT >= CpbTestNs)
+        {
+          if (cpbPos != 0) { cpbPos = 0; await ClosePosition(adapter); }
+          _ = Task.Run(() => FinalizeAsync());
+          return;
+        }
+        // Build 1-min bars from tick mids
+        var cpbBarMin = t / 60000000000L;
+        if (cpbBarMin != cpbLastBarMin)
+        {
+          if (cpbLastBarMin >= 0 && cpbBarN > 0)
+          {
+            cpbCloses.Add(cpbBarSum / cpbBarN);
+            if (cpbCloses.Count > 40) cpbCloses.RemoveAt(0);
+
+            if (cpbCloses.Count >= CpbPeriod)
+            {
+              var pctB = ComputePctB(cpbCloses, CpbPeriod, CpbMult);
+
+              if (cpbPos == 0 && !double.IsNaN(cpbPrevPctB) && cpbPrevPctB >= 0 && pctB < 0)
+              {
+                // %B crossed below 0: price broke through lower band -> long
+                cpbPos = 1; cpbBarsHeld = 0;
+                await OpenPosition(adapter, Instruments[symName], OrderSideEnum.Long, 1);
+              }
+              else if (cpbPos == 1)
+              {
+                cpbBarsHeld++;
+                if (pctB > CpbExitLevel || cpbBarsHeld >= CpbMaxBars)
+                {
+                  cpbPos = 0;
+                  await ClosePosition(adapter);
+                }
+              }
+              cpbPrevPctB = pctB;
+            }
+          }
+          cpbLastBarMin = cpbBarMin; cpbBarSum = mid; cpbBarN = 1;
+        }
+        else { cpbBarSum += mid; cpbBarN++; }
+      }
+    }
+
+    /// <summary>
+    /// Connors %B: (close - lower band) / (upper - lower), Bollinger(period, mult).
+    /// </summary>
+    static double ComputePctB(System.Collections.Generic.List<double> closes, int period, double mult)
+    {
+      int n = closes.Count;
+      double sum = 0;
+      for (int i = n - period; i < n; i++) sum += closes[i];
+      double mean = sum / period;
+      double var = 0;
+      for (int i = n - period; i < n; i++) { var += (closes[i] - mean) * (closes[i] - mean); }
+      double sd = Math.Sqrt(var / period);
+      double upper = mean + mult * sd;
+      double lower = mean - mult * sd;
+      double range = upper - lower;
+      if (range <= 0) return 0.5;
+      return (closes[n - 1] - lower) / range;
     }
 
     /// <summary>
