@@ -1,6 +1,7 @@
 using MessagePack;
 using MessagePack.Resolvers;
 using Simulation.Models;
+using Simulation.Readers;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -38,7 +39,7 @@ namespace Simulation.Tools
       var outPath = Path.Combine(dataDir, $"{instrument}.ticks");
       Console.WriteLine($"Converting {instrument} -> {outPath} (v2 two-region)");
 
-      using var reader = new LiteDbSummaryReader(Path.Combine(dataDir, $"{instrument}.db"), instrument);
+      using var reader = new LiteSummaryReader(Path.Combine(dataDir, $"{instrument}.db"), instrument);
 
       var tmpPath = outPath + ".tmp";
       using (var fs = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20))
@@ -46,8 +47,8 @@ namespace Simulation.Tools
       {
         // Header: magic(4) | version(4) | count(8) | varRegionOffset(8)
         // count and varRegionOffset rewritten at end
-        bw.Write(MmapSummaryReader.Magic);
-        bw.Write(MmapSummaryReader.CurrentVersion);
+        bw.Write(MapSummaryReader.Magic);
+        bw.Write(MapSummaryReader.CurrentVersion);
         bw.Write(0L); // placeholder count
         bw.Write(0L); // placeholder varRegionOffset
 

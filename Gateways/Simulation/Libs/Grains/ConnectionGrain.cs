@@ -5,6 +5,7 @@ using Core.Grains;
 using Core.Models;
 using Orleans;
 using Simulation.Models;
+using Simulation.Readers;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -39,7 +40,7 @@ namespace Simulation.Grains
     /// Which tick data reader to use. Defaults to LiteDB (existing behavior).
     /// Set to MemoryMapped for the flat-binary fast path (requires .ticks files).
     /// </summary>
-    protected virtual SummaryReaderKind ReaderKind { get; set; } = SummaryReaderKind.LiteDb;
+    protected virtual SummaryReaderEnum ReaderKind { get; set; } = SummaryReaderEnum.Lite;
 
     /// <summary>
     /// Setup

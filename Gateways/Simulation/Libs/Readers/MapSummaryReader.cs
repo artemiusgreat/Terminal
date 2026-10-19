@@ -1,11 +1,12 @@
+using Core.Models;
 using MessagePack;
 using MessagePack.Resolvers;
 using Simulation.Models;
-using System;
 using System.IO;
 using System.IO.MemoryMappedFiles;
+using System.Runtime.InteropServices;
 
-namespace Simulation
+namespace Simulation.Readers
 {
   /// <summary>
   /// Memory-mapped ISummaryReader with two-region layout (no MemoryPack).
@@ -34,8 +35,7 @@ namespace Simulation
   /// Fixed 48-byte tick record. Pack=1 guarantees no padding —
   /// the struct maps byte-for-byte onto the file layout.
   /// </summary>
-  [System.Runtime.InteropServices.StructLayout(
-    System.Runtime.InteropServices.LayoutKind.Sequential, Pack = 1)]
+  [StructLayout(LayoutKind.Sequential, Pack = 1)]
   struct TickRecord
   {
     public long TimeNs;     // offset 0
@@ -51,7 +51,7 @@ namespace Simulation
     public int Reserved;    // offset 44
   } // 48 bytes total
 
-  public class MmapSummaryReader : ISummaryReader
+  public class MapSummaryReader : ISummaryReader
   {
     public const int Magic = 0x5449434B; // "TICK"
     public const int CurrentVersion = 2;
@@ -63,8 +63,7 @@ namespace Simulation
     // 10_000x multiplier for price->ticks conversion (4 decimal places)
     const double PriceScale = 10000.0;
 
-    static readonly MessagePackSerializerOptions MsgPackOptions =
-      ContractlessStandardResolver.Options;
+    static readonly MessagePackSerializerOptions MsgPackOptions = ContractlessStandardResolver.Options;
 
     public string Name { get; }
 
@@ -75,26 +74,20 @@ namespace Simulation
 
     long position = -1;
     Summary current;
-    bool disposed;
 
     public Summary Current => current;
 
-    public MmapSummaryReader(string source, string instrumentName)
+    public MapSummaryReader(string source, string name)
     {
-      Name = instrumentName;
-      var path = Path.Combine(source, $"{instrumentName}.ticks");
-      if (!File.Exists(path))
-        throw new FileNotFoundException($"Tick file not found: {path}. Run TickFileConverter first.", path);
+      Name = name;
 
-      mmf = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
+      var location = Path.Combine(source, $"{name}.ticks");
+
+      mmf = MemoryMappedFile.CreateFromFile(location, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
       accessor = mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
 
       var magic = accessor.ReadInt32(0);
       var version = accessor.ReadInt32(4);
-      if (magic != Magic)
-        throw new InvalidDataException($"Bad magic in {path}: 0x{magic:X8}");
-      if (version != CurrentVersion)
-        throw new InvalidDataException($"Unsupported version {version} in {path} (expected {CurrentVersion})");
 
       count = accessor.ReadInt64(8);
       varRegionOffset = accessor.ReadInt64(16);
@@ -111,12 +104,12 @@ namespace Simulation
       // no per-field BitConverter calls.
       accessor.Read(recordOffset, out TickRecord rec);
 
-      if ((rec.Flags & FlagHasVarData) != 0 && rec.VarLength > 0)
+      if ((rec.Flags & FlagHasVarData) is not 0 && rec.VarLength > 0)
       {
         // Rare path: deserialize full Summary from variable region
-        var blob = new byte[rec.VarLength];
-        accessor.ReadArray(varRegionOffset + rec.VarOffset, blob, 0, rec.VarLength);
-        current = MessagePackSerializer.Deserialize<Summary>(blob, MsgPackOptions);
+        var sequence = new byte[rec.VarLength];
+        accessor.ReadArray(varRegionOffset + rec.VarOffset, sequence, 0, rec.VarLength);
+        current = MessagePackSerializer.Deserialize<Summary>(sequence, MsgPackOptions);
       }
       else
       {
@@ -124,10 +117,10 @@ namespace Simulation
         current = new Summary
         {
           Time = rec.TimeNs,
-          Instrument = new Core.Models.Instrument
+          Instrument = new Instrument
           {
             Name = Name,
-            Price = new Core.Models.Price
+            Price = new Price
             {
               Time = rec.TimeNs,
               Bid = rec.BidTicks / PriceScale,
@@ -144,8 +137,6 @@ namespace Simulation
 
     public void Dispose()
     {
-      if (disposed) return;
-      disposed = true;
       accessor?.Dispose();
       mmf?.Dispose();
     }

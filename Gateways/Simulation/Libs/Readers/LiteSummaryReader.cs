@@ -2,13 +2,13 @@ using LiteDB;
 using Simulation.Models;
 using System.Collections.Generic;
 
-namespace Simulation
+namespace Simulation.Readers
 {
   /// <summary>
   /// LiteDB-backed ISummaryReader. Reads Summary BSON documents sequentially.
   /// The original SimStream implementation, preserved as the default.
   /// </summary>
-  public class LiteDbSummaryReader : ISummaryReader
+  public class LiteSummaryReader : ISummaryReader
   {
     protected LiteDatabase storage;
     protected IEnumerator<Summary> enumerator;
@@ -27,10 +27,10 @@ namespace Simulation
     /// Constructor
     /// </summary>
     /// <param name="source"></param>
-    /// <param name="instrumentName"></param>
-    public LiteDbSummaryReader(string source, string instrumentName)
+    /// <param name="name"></param>
+    public LiteSummaryReader(string source, string name)
     {
-      Name = instrumentName;
+      Name = name;
       storage = new LiteDatabase(source);
       enumerator = storage
         .GetCollection<Summary>("prices")

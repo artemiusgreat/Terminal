@@ -1,8 +1,19 @@
 using Simulation.Models;
 using System;
+using System.IO;
 
-namespace Simulation
+namespace Simulation.Readers
 {
+  /// <summary>
+  /// Selects which ISummaryReader implementation to use.
+  /// Set via configuration or code — no changes to the grain required.
+  /// </summary>
+  public enum SummaryReaderEnum
+  {
+    Lite,
+    Map
+  }
+
   /// <summary>
   /// Abstraction over historical tick data sources.
   /// Implementations: LiteDB (BSON documents), memory-mapped flat binary, etc.
@@ -12,7 +23,7 @@ namespace Simulation
   public interface ISummaryReader : IDisposable
   {
     /// <summary>
-    /// Instrument name (e.g. "ES")
+    /// Instrument name, e.g. "ES"
     /// </summary>
     string Name { get; }
 
@@ -27,28 +38,21 @@ namespace Simulation
     bool MoveNext();
   }
 
-  /// <summary>
-  /// Selects which ISummaryReader implementation to use.
-  /// Set via configuration or code — no changes to the grain required.
-  /// </summary>
-  public enum SummaryReaderKind
-  {
-    LiteDb,
-    MemoryMapped
-  }
-
   public static class SummaryReaderFactory
   {
     /// <summary>
-    /// Creates a reader for the given instrument.
-    /// source is the data directory; the file name is resolved per kind
+    /// Creates a reader for the given instrument, source is the data directory.
     /// ({name}.db for LiteDB, {name}.ticks for memory-mapped binary).
     /// </summary>
-    public static ISummaryReader Create(SummaryReaderKind kind, string source, string instrumentName)
-      => kind switch
+    public static ISummaryReader Create(SummaryReaderEnum reader, string source, string name)
+    {
+      switch (reader)
       {
-        SummaryReaderKind.MemoryMapped => new MmapSummaryReader(source, instrumentName),
-        _ => new LiteDbSummaryReader(System.IO.Path.Combine(source, $"{instrumentName}.db"), instrumentName),
+        case SummaryReaderEnum.Map: return new MapSummaryReader(source, name);
+        case SummaryReaderEnum.Lite: return new LiteSummaryReader(Path.Combine(source, $"{name}.db"), name);
       };
+
+      return null;
+    }
   }
 }
