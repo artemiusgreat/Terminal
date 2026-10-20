@@ -45,3 +45,20 @@ Long-only. 1 lot. No stop-loss/take-profit — the Supertrend line is the traili
 **600-bar C# validation:** 6/6 trades match Python.
 
 **Topstep $1000/day stop:** Net drops to $430 (-$2,010). Trailing exits need room the daily stop doesn't give. Not recommended for Topstep.
+
+**C# Terminal backtest — 3 days, Topstep rules** (ES trade ticks via MemoryMapReader, Jul 1–3 2026 ET; pipeline-enforced $1000/day stop and no trading 16:00–18:00 ET; commission $1 per closed trade in C#, $1/side in Python):
+
+| Metric | C# | Python (same window) |
+|---|---|---|
+| Net | $1,986 | $1,573 |
+| Trades | 52 | 51 |
+| Win % | 38.5% | 39.2% |
+| Profit Factor | 1.40 | 1.30 |
+| Sharpe | 8.11 | 6.58 |
+| Max Drawdown | $1,532 | $1,638 |
+| $/trade | $38.18 | $30.84 |
+| Avg Win / Avg Loss | $348 / $-156 | $337 / $-167 |
+| Max Consec Win / Loss | 4 / 8 | 4 / 7 |
+| Recovery | 1.30 | 0.96 |
+
+C# and Python agree closely on this window (trade counts within 1, PF within 0.1); residual differences are fill timing and the commission convention.

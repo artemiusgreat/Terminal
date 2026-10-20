@@ -45,3 +45,20 @@ Both directions. 1 lot. No same-bar reversals (if exiting, the bar is done).
 **600-bar C# validation:** 22/22 trades match Python.
 
 **Topstep $1000/day stop:** Net $4,698 (3 stop-outs). Avg hold 18 min — good for event management. Recommended as Topstep workhorse.
+
+**C# Terminal backtest — 3 days, Topstep rules** (ES trade ticks via MemoryMapReader, Jul 1–3 2026 ET; pipeline-enforced $1000/day stop and no trading 16:00–18:00 ET; commission $1 per closed trade in C#, $1/side in Python):
+
+| Metric | C# | Python (same window) |
+|---|---|---|
+| Net | $-1,048 | $-1,134 |
+| Trades | 111 | 111 |
+| Win % | 60.4% | 61.3% |
+| Profit Factor | 0.90 | 0.89 |
+| Sharpe | -3.10 | -3.27 |
+| Max Drawdown | $2,980 | $3,011 |
+| $/trade | $-9.45 | $-10.22 |
+| Avg Win / Avg Loss | $135 / $-229 | $135 / $-240 |
+| Max Consec Win / Loss | 9 / 4 | 9 / 3 |
+| Recovery | -0.35 | -0.38 |
+
+C# and Python agree closely on this window (trade counts within 1, PF within 0.1); residual differences are fill timing and the commission convention.
