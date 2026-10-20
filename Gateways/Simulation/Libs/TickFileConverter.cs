@@ -18,7 +18,7 @@ namespace Simulation.Tools
   /// quote (best Bid/Ask + sizes from the book, Last/Volume from the trade).
   ///
   /// Output (independent datasets, same tick sequence):
-  ///   {instrument}.ticks — fixed 52-byte records back-to-back, no header.
+  ///   {instrument}.ticks — fixed 56-byte records back-to-back, no header.
   ///                        Price-only view for FixedSummaryReader.
   ///   {instrument}.vars  — length-prefixed MessagePack blobs, no header:
   ///                        [length: int32][blob]... Full-fidelity view
@@ -86,7 +86,7 @@ namespace Simulation.Tools
             ticksBw.Write(price.Last ?? 0);
             ticksBw.Write(price.BidSize ?? 0);
             ticksBw.Write(price.AskSize ?? 0);
-            ticksBw.Write((int)(price.Volume ?? 0));
+            ticksBw.Write(price.Volume ?? 0);
             /*
             // Variable blob: full Summary as MessagePack, length-prefixed
             var blob = MessagePackSerializer.Serialize(s, MsgPackOptions);

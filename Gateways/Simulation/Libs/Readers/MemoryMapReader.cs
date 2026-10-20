@@ -7,14 +7,14 @@ using System.Runtime.InteropServices;
 namespace Simulation.Readers
 {
   /// <summary>
-  /// Memory-mapped ISummaryReader for fixed 52-byte tick records.
+  /// Memory-mapped ISummaryReader for fixed 56-byte tick records.
   ///
   /// File: {name}.ticks — raw 52-byte records back-to-back, no header.
-  /// Record count is derived from file size (length / 52).
+  /// Record count is derived from file size (length / 56).
   ///
-  /// Fixed record (52 bytes):
+  /// Fixed record (56 bytes):
   ///   Time(8) | Bid(8) | Ask(8) | Last(8) | BidSize(8) | AskSize(8) |
-  ///   Volume(4)
+  ///   Volume(8)
   ///
   /// Price-only view: no Dom/Order/Options. For full-fidelity history
   /// use VariableSummaryReader ({name}.vars) instead. The two readers
@@ -34,8 +34,8 @@ namespace Simulation.Readers
     public double Last;     // offset 24
     public double BidSize;  // offset 32
     public double AskSize;  // offset 40
-    public int Volume;      // offset 48
-  } // 52 bytes total
+    public double Volume;   // offset 48
+  } // 56 bytes total
 
   public class MemoryMapReader : ISummaryReader
   {
@@ -71,7 +71,7 @@ namespace Simulation.Readers
 
       var recordOffset = position * RecordSize;
 
-      // Direct struct copy from the mapped view — single 52-byte read.
+      // Direct struct copy from the mapped view — single 56-byte read.
       accessor.Read(recordOffset, out TickRecord rec);
 
       current = new Summary
