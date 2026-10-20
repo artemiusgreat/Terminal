@@ -11,8 +11,8 @@ namespace Simulation.Readers
   public enum SummaryReaderEnum
   {
     Lite,
-    Fixed,
-    Variable
+    MemoryMap,
+    VariableMap
   }
 
   /// <summary>
@@ -48,8 +48,8 @@ namespace Simulation.Readers
     {
       switch (reader)
       {
-        case SummaryReaderEnum.Fixed: return new MemoryMapReader(source, name);
-        case SummaryReaderEnum.Variable: return new VariableMapReader(source, name);
+        case SummaryReaderEnum.MemoryMap: return new MemoryMapReader(source, name);
+        case SummaryReaderEnum.VariableMap: return new VariableMapReader(source, name);
         case SummaryReaderEnum.Lite: return new LiteReader(Path.Combine(source, $"{name}.db"), name);
       };
 

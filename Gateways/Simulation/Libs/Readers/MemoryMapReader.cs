@@ -7,35 +7,19 @@ using System.Runtime.InteropServices;
 namespace Simulation.Readers
 {
   /// <summary>
-  /// Memory-mapped ISummaryReader for fixed 56-byte tick records.
-  ///
-  /// File: {name}.ticks — raw 56-byte records back-to-back, no header.
-  /// Record count is derived from file size (length / 56).
-  ///
-  /// Fixed record (56 bytes):
-  ///   Time(8) | Bid(8) | Ask(8) | Last(8) | BidSize(8) | AskSize(8) |
-  ///   Volume(8)
-  ///
-  /// Price-only view: no Dom/Order/Options. For full-fidelity history
-  /// use VariableMapReader ({name}.vars) instead. The two readers
-  /// are independent — neither calls the other.
-  ///
-  /// Hot path is zero-copy: records are read directly from the mapped view
-  /// as a struct, no deserialization.
-  ///
-  /// Use TickFileConverter to build .ticks files from LiteDB (one-time).
+  /// Memory-mapped ISummaryReader for a fixed size structure.
   /// </summary>
   [StructLayout(LayoutKind.Sequential, Pack = 1)]
   struct TickRecord
   {
-    public long Time;       // offset 0
-    public double Bid;      // offset 8
-    public double Ask;      // offset 16
-    public double Last;     // offset 24
-    public double BidSize;  // offset 32
-    public double AskSize;  // offset 40
-    public double Volume;   // offset 48
-  } // 56 bytes total
+    public long Time;
+    public double Bid;
+    public double Ask;
+    public double Last;
+    public double BidSize;
+    public double AskSize;
+    public double Volume;
+  }
 
   public class MemoryMapReader : ISummaryReader
   {
@@ -43,7 +27,7 @@ namespace Simulation.Readers
 
     public string Name { get; }
 
-    readonly MemoryMappedFile mmf;
+    readonly MemoryMappedFile map;
     readonly MemoryMappedViewAccessor accessor;
     readonly long count;
 
@@ -56,24 +40,23 @@ namespace Simulation.Readers
     {
       Name = name;
 
-      var ticksPath = Path.Combine(source, $"{name}.ticks");
-      mmf = MemoryMappedFile.CreateFromFile(ticksPath, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
-      accessor = mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
+      var doc = Path.Combine(source, $"{name}.ticks");
 
-      // No header — count derived from file size
-      count = new FileInfo(ticksPath).Length / RecordSize;
+      map = MemoryMappedFile.CreateFromFile(doc, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
+      accessor = map.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
+      count = new FileInfo(doc).Length / RecordSize;
     }
 
     public bool MoveNext()
     {
-      if (position + 1 >= count) return false;
-      position++;
+      if (position++ + 1 >= count)
+      {
+        return false;
+      }
 
-      var recordOffset = position * RecordSize;
+      var index = position * RecordSize;
 
-      // Direct struct copy from the mapped view — single 56-byte read.
-      accessor.Read(recordOffset, out TickRecord rec);
-
+      accessor.Read(index, out TickRecord rec);
       current = new Summary
       {
         Time = rec.Time,
@@ -87,6 +70,7 @@ namespace Simulation.Readers
             Ask = rec.Ask,
             BidSize = rec.BidSize,
             AskSize = rec.AskSize,
+            Volume = rec.Volume
           }
         }
       };
@@ -97,7 +81,7 @@ namespace Simulation.Readers
     public void Dispose()
     {
       accessor?.Dispose();
-      mmf?.Dispose();
+      map?.Dispose();
     }
   }
 }

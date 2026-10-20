@@ -41,7 +41,7 @@ namespace Simulation.Grains
     /// Which tick data reader to use. Defaults to LiteDB (existing behavior).
     /// Set to MemoryMapped for the flat-binary fast path (requires .ticks files).
     /// </summary>
-    protected virtual SummaryReaderEnum SummaryReader { get; set; } = SummaryReaderEnum.Lite;
+    protected virtual SummaryReaderEnum SummaryReader { get; set; } = SummaryReaderEnum.MemoryMap;
 
     /// <summary>
     /// Setup
