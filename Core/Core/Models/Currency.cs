@@ -1,8 +1,10 @@
 using Core.Enums;
+using Orleans;
 
 namespace Core.Models
 {
-  public partial record Currency
+  [Immutable]
+  public record Currency
   {
     /// <summary>
     /// Currency

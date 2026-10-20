@@ -1,8 +1,10 @@
+using Orleans;
 using System.Collections.Generic;
 
 namespace Core.Models
 {
-  public partial record Dom
+  [Immutable]
+  public record Dom
   {
     /// <summary>
     /// Asks

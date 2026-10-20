@@ -1,7 +1,9 @@
+using Orleans;
+
 namespace Core.Models
 {
-  // MemoryPack usings via global
-  public partial record Variance
+  [Immutable]
+  public record Variance
   {
     /// <summary>
     /// Delta

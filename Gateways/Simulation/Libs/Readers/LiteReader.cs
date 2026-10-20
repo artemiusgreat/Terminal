@@ -8,7 +8,7 @@ namespace Simulation.Readers
   /// LiteDB-backed ISummaryReader. Reads Summary BSON documents sequentially.
   /// The original SimStream implementation, preserved as the default.
   /// </summary>
-  public class LiteSummaryReader : ISummaryReader
+  public class LiteReader : ISummaryReader
   {
     protected LiteDatabase storage;
     protected IEnumerator<Summary> enumerator;
@@ -28,7 +28,7 @@ namespace Simulation.Readers
     /// </summary>
     /// <param name="source"></param>
     /// <param name="name"></param>
-    public LiteSummaryReader(string source, string name)
+    public LiteReader(string source, string name)
     {
       Name = name;
       storage = new LiteDatabase(source);

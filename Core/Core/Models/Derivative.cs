@@ -1,9 +1,11 @@
 using Core.Enums;
+using Orleans;
 using System;
 
 namespace Core.Models
 {
-  public partial record Derivative
+  [Immutable]
+  public record Derivative
   {
     /// <summary>
     /// Strike price

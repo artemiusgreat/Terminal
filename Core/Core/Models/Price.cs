@@ -1,8 +1,10 @@
+using Orleans;
 using System;
 
 namespace Core.Models
 {
-  public partial record Price
+  [Immutable]
+  public record Price
   {
     /// <summary>
     /// Bid

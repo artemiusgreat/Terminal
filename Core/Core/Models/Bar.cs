@@ -1,7 +1,9 @@
+using Orleans;
+
 namespace Core.Models
 {
-  // MemoryPack usings via global
-  public partial record Bar
+  [Immutable]
+  public record Bar
   {
     /// <summary>
     /// Lowest price of the bar

@@ -1,8 +1,10 @@
 using Core.Enums;
+using Orleans;
 
 namespace Core.Models
 {
-  public partial record DomOrder
+  [Immutable]
+  public record DomOrder
   {
     /// <summary>
     /// Id

@@ -22,7 +22,7 @@ namespace Simulation.Readers
   ///
   /// Use TickFileConverter to build .vars files from LiteDB (one-time).
   /// </summary>
-  public class VariableSummaryReader : ISummaryReader
+  public class VariableMapReader : ISummaryReader
   {
     static readonly MessagePackSerializerOptions MsgPackOptions = ContractlessStandardResolver.Options;
 
@@ -37,7 +37,7 @@ namespace Simulation.Readers
 
     public Summary Current => current;
 
-    public VariableSummaryReader(string source, string name)
+    public VariableMapReader(string source, string name)
     {
       Name = name;
 

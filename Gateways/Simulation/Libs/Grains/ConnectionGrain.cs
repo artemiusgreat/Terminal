@@ -36,11 +36,12 @@ namespace Simulation.Grains
     protected PriorityQueue<ISummaryReader, long> queue = new();
     protected ConcurrentDictionary<string, ISummaryReader> docs = new();
     protected ConcurrentDictionary<string, ISummaryReader> streams = new();
+
     /// <summary>
     /// Which tick data reader to use. Defaults to LiteDB (existing behavior).
     /// Set to MemoryMapped for the flat-binary fast path (requires .ticks files).
     /// </summary>
-    protected virtual SummaryReaderEnum ReaderKind { get; set; } = SummaryReaderEnum.Lite;
+    protected virtual SummaryReaderEnum SummaryReader { get; set; } = SummaryReaderEnum.Lite;
 
     /// <summary>
     /// Setup
@@ -63,8 +64,7 @@ namespace Simulation.Grains
         {
           var name = instrument.Name;
           var instrumentDescriptor = this.GetDescriptor(name);
-          // Factory resolves the file name per kind (.db for LiteDB, .ticks for mmap)
-          var stream = docs[name] = SummaryReaderFactory.Create(ReaderKind, state.Source, name);
+          var stream = docs[name] = SummaryReaderFactory.Create(SummaryReader, state.Source, name);
 
           await Subscribe(instrument);
           await GrainFactory.GetGrain<IDomGrain>(instrumentDescriptor).StoreInstrument(instrument);

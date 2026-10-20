@@ -37,7 +37,7 @@ namespace Simulation.Readers
     public int Volume;      // offset 48
   } // 52 bytes total
 
-  public class FixedSummaryReader : ISummaryReader
+  public class MemoryMapReader : ISummaryReader
   {
     static readonly int RecordSize = Marshal.SizeOf<TickRecord>();
 
@@ -52,7 +52,7 @@ namespace Simulation.Readers
 
     public Summary Current => current;
 
-    public FixedSummaryReader(string source, string name)
+    public MemoryMapReader(string source, string name)
     {
       Name = name;
 

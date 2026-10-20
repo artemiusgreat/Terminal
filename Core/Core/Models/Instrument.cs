@@ -1,8 +1,10 @@
 using Core.Enums;
+using Orleans;
 
 namespace Core.Models
 {
-  public partial record Instrument
+  [Immutable]
+  public record Instrument
   {
     /// <summary>
     /// ID
