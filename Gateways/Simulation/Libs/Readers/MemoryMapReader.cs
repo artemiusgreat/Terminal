@@ -85,8 +85,10 @@ namespace Simulation.Readers
             Time = rec.Time,
             Bid = rec.Bid,
             Ask = rec.Ask,
+            Last = rec.Last,
             BidSize = rec.BidSize,
             AskSize = rec.AskSize,
+            Volume = rec.Volume,
           }
         }
       };
