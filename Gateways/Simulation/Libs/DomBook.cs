@@ -27,6 +27,11 @@ namespace Core.Models
     public Dom State { get; } = new();
 
     /// <summary>
+    /// Number of live orders currently in the book
+    /// </summary>
+    public int OrderCount => orderIndex.Count;
+
+    /// <summary>
     /// Order index for O(1) lookup by ID
     /// </summary>
     protected Dictionary<string, LinkedListNode<DomOrder>> orderIndex = new();

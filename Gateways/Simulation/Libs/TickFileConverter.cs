@@ -17,6 +17,11 @@ namespace Simulation.Tools
   /// tick record ONLY on DomAction.Trade, using the aggregated Instrument
   /// quote (best Bid/Ask + sizes from the book, Last/Volume from the trade).
   ///
+  /// Processing is batched: every BatchSize MBO records the writers are
+  /// flushed and a progress line (counts, book size, managed memory) is
+  /// printed. Nothing is buffered in memory beyond the current record —
+  /// the only retained state is the DomBook itself (bounded by live orders).
+  ///
   /// Output (independent datasets, same tick sequence):
   ///   {instrument}.ticks — fixed 56-byte records back-to-back, no header.
   ///                        Price-only view for MemoryMapReader.
@@ -29,6 +34,9 @@ namespace Simulation.Tools
   /// </summary>
   public static class TickFileConverter
   {
+    // MBO records processed between flushes / progress reports
+    const int BatchSize = 1_000_000;
+
     static readonly MessagePackSerializerOptions MsgPackOptions =
       ContractlessStandardResolver.Options;
 
@@ -45,6 +53,7 @@ namespace Simulation.Tools
 
       long count = 0;      // trade ticks written
       long mboCount = 0;   // MBO records processed
+      long batchCount = 0; // MBO records in current batch
 
       // StepSize for book price keys — from first instrument, default 0.01
       double stepSize = 0.01;
@@ -64,6 +73,7 @@ namespace Simulation.Tools
             continue;
 
           mboCount++;
+          batchCount++;
 
           // Lazily init book with StepSize from first available instrument
           if (book is null)
@@ -94,12 +104,20 @@ namespace Simulation.Tools
             varsBw.Write(blob);
             */
             count++;
-            if (count % 1_000_000 == 0) Console.WriteLine($"  {count:N0} trades...");
           }
           else
           {
             // Update book state (Store/Update/Remove/Clear)
             book.SendOrder(order);
+          }
+
+          // End of batch: flush writers, report progress + memory
+          if (batchCount >= BatchSize)
+          {
+            ticksBw.Flush();
+            varsBw.Flush();
+            Console.WriteLine($"  {mboCount:N0} MBO, {count:N0} trades, book {book.OrderCount:N0} orders, GC {GC.GetTotalMemory(false) / 1048576:N0} MB");
+            batchCount = 0;
           }
         }
       }
