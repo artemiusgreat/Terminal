@@ -111,6 +111,11 @@ namespace Runner
     long endTime;
     int finalized;
 
+    // Non-RTH test mode: when true, entries are allowed only outside regular
+    // trading hours (18:00-09:30 ET); any open position is force-flattened at
+    // the RTH open. Topstep rules still apply on top.
+    const bool NonRthOnly = false;
+
     // --- Topstep guard + run window (host-level, applies to every strategy) ---
     long runEndNs;                 // window end (unix ns): first tick >= this ends the run
     long lastTopstepMinute = -1;   // last ET minute the Topstep check ran
@@ -265,6 +270,7 @@ namespace Runner
 
       var secs = et.TimeOfDay.TotalSeconds;
       var inHalt = secs >= 16 * 3600 && secs < 18 * 3600;
+      var inRth = secs >= 9.5 * 3600 && secs < 16 * 3600;
 
       var positions = (await Adapter.GetPositions(new() { Source = true })).Data;
       var hasPosition = positions is not null && positions.Count > 0;
@@ -272,6 +278,7 @@ namespace Runner
       var needFlat = false;
 
       if (inHalt && hasPosition) needFlat = true;
+      if (NonRthOnly && inRth && hasPosition) needFlat = true;
 
       if (!dayStopped)
       {
@@ -279,7 +286,7 @@ namespace Runner
         if (dayPnl <= -1000.0) { dayStopped = true; needFlat = true; }
       }
 
-      context.EntriesBlocked = inHalt || dayStopped;
+      context.EntriesBlocked = inHalt || dayStopped || (NonRthOnly && inRth);
 
       if (needFlat && hasPosition)
       {
