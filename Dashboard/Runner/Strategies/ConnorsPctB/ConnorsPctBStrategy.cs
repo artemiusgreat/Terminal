@@ -12,7 +12,7 @@ namespace Runner.Strategies.ConnorsPctB
   /// band), exit when %B recovers above 0.5 or after 10 bars max.
   /// 1-day test cutoff: flattens and requests shutdown after 24h of data.
   /// </summary>
-  public sealed class ConnorsPctBStrategy : IStrategy
+  public sealed class ConnorsPctBStrategy : IStrategy, IForcedFlatAware
   {
     readonly StrategyContext _ctx;
 
@@ -27,8 +27,6 @@ namespace Runner.Strategies.ConnorsPctB
     double cpbPrevPctB = double.NaN;
     int cpbPos;       // 0 flat, 1 long
     int cpbBarsHeld;
-    long cpbFirstT;   // first tick time for 1-day test cutoff
-    const long CpbTestNs = 24L * 60 * 60 * 1000000000L; // 1 day
 
     const string symName = "ES";
 
@@ -37,21 +35,14 @@ namespace Runner.Strategies.ConnorsPctB
       _ctx = ctx;
     }
 
+    public void OnForcedFlat() { cpbPos = 0; }
+
     public async Task OnTickAsync(StrategyTick tick)
     {
       if (tick.Symbol != "ES") return;
 
       var t = tick.TimeNs;
       var mid = tick.Mid;
-
-      // 1-day test cutoff
-      if (cpbFirstT == 0) cpbFirstT = t;
-      if (t - cpbFirstT >= CpbTestNs)
-      {
-        if (cpbPos != 0) { cpbPos = 0; await _ctx.ClosePosition(); }
-        _ = Task.Run(() => _ctx.RequestShutdownAsync());
-        return;
-      }
 
       // Build 1-min bars from tick mids
       var cpbBarMin = t / 60000000000L;
@@ -71,8 +62,8 @@ namespace Runner.Strategies.ConnorsPctB
             if (cpbPos == 0 && !double.IsNaN(cpbPrevPctB) && cpbPrevPctB >= 0 && pctB < 0)
             {
               // %B crossed below 0: price broke through lower band -> long
-              cpbPos = 1; cpbBarsHeld = 0;
-              await _ctx.OpenPosition(symName, OrderSideEnum.Long, 1);
+              if (await _ctx.OpenPosition(symName, OrderSideEnum.Long, 1))
+              { cpbPos = 1; cpbBarsHeld = 0; }
             }
             else if (cpbPos == 1)
             {

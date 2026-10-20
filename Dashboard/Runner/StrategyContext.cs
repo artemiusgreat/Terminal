@@ -23,6 +23,13 @@ namespace Runner
     public IReadOnlyDictionary<string, Instrument> Instruments { get; set; } =
       new Dictionary<string, Instrument>();
 
+    /// <summary>
+    /// Topstep gate: while true, OpenPosition is refused (returns false).
+    /// Set by the pipeline during the 16:00-18:00 ET halt and after the
+    /// $1000 daily stop triggers. Closing is never blocked.
+    /// </summary>
+    public bool EntriesBlocked { get; set; }
+
     /// <summary>Requests pipeline shutdown (idempotent). Set by the pipeline in Setup().</summary>
     public Func<Task> RequestShutdownAsync { get; set; } = () => Task.CompletedTask;
 
@@ -35,9 +42,12 @@ namespace Runner
     public static double EtSecondsOfDay(long timeNs) =>
       TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(timeNs / 1000000L), EtZone).TimeOfDay.TotalSeconds;
 
-    /// <summary>Opens a market position, optionally with braced SL/TP.</summary>
-    public virtual async Task OpenPosition(string symbol, OrderSideEnum side, double amount = 1, double? sl = null, double? tp = null)
+    /// <summary>Opens a market position, optionally with braced SL/TP.
+    /// Returns false when the Topstep gate blocks entries (nothing sent).</summary>
+    public virtual async Task<bool> OpenPosition(string symbol, OrderSideEnum side, double amount = 1, double? sl = null, double? tp = null)
     {
+      if (EntriesBlocked) return false;
+
       var asset = Instruments[symbol];
       var order = new Order
       {
@@ -84,6 +94,7 @@ namespace Runner
       }
 
       await Adapter.SendOrder(order);
+      return true;
     }
 
     /// <summary>Closes all open positions at market.</summary>

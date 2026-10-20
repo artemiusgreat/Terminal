@@ -12,7 +12,7 @@ namespace Runner.Strategies.WilliamsR
   /// short entry on %R cross above -20, exit short when %R &lt; -80.
   /// Both directions, 1 lot. Bars built from tick mids (HLC from mid).
   /// </summary>
-  public sealed class WilliamsRStrategy : IStrategy
+  public sealed class WilliamsRStrategy : IStrategy, IForcedFlatAware
   {
     readonly StrategyContext _ctx;
 
@@ -32,6 +32,8 @@ namespace Runner.Strategies.WilliamsR
     const string symName = "ES";
 
     public WilliamsRStrategy(StrategyContext ctx) { _ctx = ctx; }
+
+    public void OnForcedFlat() { _pos = 0; }
 
     public async Task OnTickAsync(StrategyTick tick)
     {
@@ -96,13 +98,11 @@ namespace Runner.Strategies.WilliamsR
       {
         if (longEntry)
         {
-          _pos = 1;
-          await _ctx.OpenPosition(symName, OrderSideEnum.Long, 1);
+          if (await _ctx.OpenPosition(symName, OrderSideEnum.Long, 1)) _pos = 1;
         }
         else if (shortEntry)
         {
-          _pos = -1;
-          await _ctx.OpenPosition(symName, OrderSideEnum.Short, 1);
+          if (await _ctx.OpenPosition(symName, OrderSideEnum.Short, 1)) _pos = -1;
         }
       }
     }

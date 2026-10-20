@@ -12,6 +12,16 @@ namespace Runner
     Task OnTickAsync(StrategyTick tick);
   }
 
+  /// <summary>
+  /// Optional hook: the pipeline force-flattened all positions (Topstep
+  /// halt window, daily stop, or run end). Implement to reset internal
+  /// position state so it stays in sync with the account.
+  /// </summary>
+  public interface IForcedFlatAware
+  {
+    void OnForcedFlat();
+  }
+
   /// <summary>A single spread-filtered tick handed to the strategy.</summary>
   public sealed record StrategyTick(string Symbol, double Bid, double Ask, double Mid, long TimeNs);
 }

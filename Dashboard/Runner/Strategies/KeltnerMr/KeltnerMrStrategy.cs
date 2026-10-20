@@ -12,7 +12,7 @@ namespace Runner.Strategies.KeltnerMr
   /// below the lower band, exit when close crosses above the EMA middle.
   /// 1 lot. Bars built from tick mids (HLC from mid).
   /// </summary>
-  public sealed class KeltnerMrStrategy : IStrategy
+  public sealed class KeltnerMrStrategy : IStrategy, IForcedFlatAware
   {
     readonly StrategyContext _ctx;
 
@@ -31,6 +31,8 @@ namespace Runner.Strategies.KeltnerMr
     const string symName = "ES";
 
     public KeltnerMrStrategy(StrategyContext ctx) { _ctx = ctx; }
+
+    public void OnForcedFlat() { _pos = 0; }
 
     public async Task OnTickAsync(StrategyTick tick)
     {
@@ -73,8 +75,7 @@ namespace Runner.Strategies.KeltnerMr
 
       if (_pos == 0 && loOk && ca[i] < lower[i] && ca[i - 1] >= lower[i - 1])
       {
-        _pos = 1;
-        await _ctx.OpenPosition(symName, OrderSideEnum.Long, 1);
+        if (await _ctx.OpenPosition(symName, OrderSideEnum.Long, 1)) _pos = 1;
       }
       else if (_pos == 1 && meOk && ca[i] > middle[i] && ca[i - 1] <= middle[i - 1])
       {

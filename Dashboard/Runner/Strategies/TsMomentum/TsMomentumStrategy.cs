@@ -11,7 +11,7 @@ namespace Runner.Strategies.TsMomentum
   /// to -1; entries delayed 1 bar after the flip (engine can't flip same-bar),
   /// exits on the flip bar. Both directions, 1 lot.
   /// </summary>
-  public sealed class TsMomentumStrategy : IStrategy
+  public sealed class TsMomentumStrategy : IStrategy, IForcedFlatAware
   {
     readonly StrategyContext _ctx;
 
@@ -32,6 +32,8 @@ namespace Runner.Strategies.TsMomentum
     const string symName = "ES";
 
     public TsMomentumStrategy(StrategyContext ctx) { _ctx = ctx; }
+
+    public void OnForcedFlat() { _pos = 0; _pendingEntry = 0; }
 
     public async Task OnTickAsync(StrategyTick tick)
     {
@@ -60,9 +62,8 @@ namespace Runner.Strategies.TsMomentum
       // 1) Execute pending entry from last bar's regime flip
       if (_pendingEntry != 0 && _pos == 0)
       {
-        _pos = _pendingEntry;
-        var side = _pos > 0 ? OrderSideEnum.Long : OrderSideEnum.Short;
-        await _ctx.OpenPosition(symName, side, 1);
+        var side = _pendingEntry > 0 ? OrderSideEnum.Long : OrderSideEnum.Short;
+        if (await _ctx.OpenPosition(symName, side, 1)) _pos = _pendingEntry;
         _pendingEntry = 0;
       }
 

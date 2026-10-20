@@ -12,7 +12,7 @@ namespace Runner.Strategies.Ou
   /// Refits the OU process on 1-min bars every 15 min (used for diagnostics;
   /// entry distance is the fixed 1.5-sigma band).
   /// </summary>
-  public sealed class OuStrategy : IStrategy
+  public sealed class OuStrategy : IStrategy, IForcedFlatAware
   {
     readonly StrategyContext _ctx;
 
@@ -44,6 +44,8 @@ namespace Runner.Strategies.Ou
     {
       _ctx = ctx;
     }
+
+    public void OnForcedFlat() { mrPos = 0; }
 
     public async Task OnTickAsync(StrategyTick tick)
     {
@@ -118,13 +120,13 @@ namespace Runner.Strategies.Ou
         {
           if (mid < lo)
           {
-            mrPos = 1; mrEntry = ask;
-            await _ctx.OpenPosition(symName, OrderSideEnum.Long, ouContracts);
+            if (await _ctx.OpenPosition(symName, OrderSideEnum.Long, ouContracts))
+            { mrPos = 1; mrEntry = ask; }
           }
           else if (mid > hi)
           {
-            mrPos = -1; mrEntry = bid;
-            await _ctx.OpenPosition(symName, OrderSideEnum.Short, ouContracts);
+            if (await _ctx.OpenPosition(symName, OrderSideEnum.Short, ouContracts))
+            { mrPos = -1; mrEntry = bid; }
           }
         }
         else if (mrPos == 1)

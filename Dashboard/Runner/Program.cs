@@ -111,6 +111,14 @@ namespace Runner
     long endTime;
     int finalized;
 
+    // --- Topstep guard + run window (host-level, applies to every strategy) ---
+    long runEndNs;                 // window end (unix ns): first tick >= this ends the run
+    long lastTopstepMinute = -1;   // last ET minute the Topstep check ran
+    DateTime topstepDay;           // current ET calendar day being tracked
+    bool dayStopped;               // $1000 daily loss stop hit for topstepDay
+    bool windowClosed;             // window-end flatten already issued
+    readonly Dictionary<string, double> lastMid = new();
+
     const double TickSize = 0.25;
 
     Dictionary<string, Instrument> Instruments = new()
@@ -148,6 +156,13 @@ namespace Runner
         ticksFs.ReadExactly(buffer, 0, 8);
         endTime = BitConverter.ToInt64(buffer, 0);
       }
+
+      // Run window: 3 ET days from the start of the data (Jul 1-3 sessions).
+      // Ends at Jul 4 2026 00:00 ET; first tick at/after it flattens + finalizes.
+      var runEndLocal = new DateTime(2026, 7, 4, 0, 0, 0, DateTimeKind.Unspecified);
+      var runEndUtc = TimeZoneInfo.ConvertTimeToUtc(runEndLocal, StrategyContext.EtZone);
+      runEndNs = (runEndUtc.Ticks - DateTime.UnixEpoch.Ticks) * 100L;
+      if (endTime > 0 && endTime < runEndNs) runEndNs = endTime;
 
       adapter.OnInstrument = async instrument =>
       {
@@ -203,7 +218,103 @@ namespace Runner
       if (double.IsNaN(bid) || double.IsNaN(ask)) return;
       if ((ask - bid) / TickSize > 3) return; // skip insane quotes (see tick study)
       var mid = (bid + ask) / 2;
-      await strategy.OnTickAsync(new StrategyTick(instrument.Name, bid, ask, mid, price.Time.Value));
+      var t = price.Time.Value;
+
+      lastMid[instrument.Name] = mid;
+
+      // Run window end: flatten once and finalize; later ticks are ignored.
+      if (runEndNs > 0 && t >= runEndNs)
+      {
+        if (!windowClosed)
+        {
+          windowClosed = true;
+          await context.ClosePosition();
+          (strategy as IForcedFlatAware)?.OnForcedFlat();
+          _ = Task.Run(() => FinalizeAsync());
+        }
+        return;
+      }
+
+      // Topstep evaluation once per minute of data (cheap; not per tick).
+      var minute = t / 60000000000L;
+      if (minute != lastTopstepMinute)
+      {
+        lastTopstepMinute = minute;
+        await EvaluateTopstepAsync(t);
+      }
+
+      await strategy.OnTickAsync(new StrategyTick(instrument.Name, bid, ask, mid, t));
+    }
+
+    /// <summary>
+    /// Topstep rules, evaluated once per data minute:
+    /// - no trading 16:00-18:00 ET: entries blocked, open position force-flattened;
+    /// - max $1000 loss per ET calendar day (realized + unrealized at last mid):
+    ///   on breach, flatten and block entries until the next ET day.
+    /// </summary>
+    async Task EvaluateTopstepAsync(long t)
+    {
+      var et = TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(t / 1000000L), StrategyContext.EtZone);
+      var day = et.Date;
+
+      if (day != topstepDay)
+      {
+        topstepDay = day;
+        dayStopped = false;
+      }
+
+      var secs = et.TimeOfDay.TotalSeconds;
+      var inHalt = secs >= 16 * 3600 && secs < 18 * 3600;
+
+      var positions = (await Adapter.GetPositions(new() { Source = true })).Data;
+      var hasPosition = positions is not null && positions.Count > 0;
+
+      var needFlat = false;
+
+      if (inHalt && hasPosition) needFlat = true;
+
+      if (!dayStopped)
+      {
+        var dayPnl = await DayPnlAsync(day, positions);
+        if (dayPnl <= -1000.0) { dayStopped = true; needFlat = true; }
+      }
+
+      context.EntriesBlocked = inHalt || dayStopped;
+
+      if (needFlat && hasPosition)
+      {
+        await context.ClosePosition();
+        (strategy as IForcedFlatAware)?.OnForcedFlat();
+      }
+    }
+
+    /// <summary>Realized PnL for the ET day + unrealized on open positions.</summary>
+    async Task<double> DayPnlAsync(DateTime day, IList<Order> positions)
+    {
+      double pnl = 0;
+
+      var txns = (await Adapter.GetTransactions(default)).Data;
+      foreach (var txn in txns)
+      {
+        if (txn?.Operation?.Time is null || txn.Balance?.Current is null) continue;
+        var et = TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(txn.Operation.Time.Value / 1000000L), StrategyContext.EtZone);
+        if (et.Date == day) pnl += txn.Balance.Current.Value;
+      }
+
+      if (positions is not null)
+      {
+        foreach (var position in positions)
+        {
+          var op = position.Operation;
+          if (op?.Instrument is null || op.AveragePrice is null || op.Amount is null) continue;
+          if (!lastMid.TryGetValue(op.Instrument.Name, out var mid)) continue;
+          var dir = position.Side is OrderSideEnum.Long ? 1.0 : -1.0;
+          var pointValue = Instruments.TryGetValue(op.Instrument.Name, out var instr) ? instr.Leverage ?? 0 : 0;
+          pnl += dir * (mid - op.AveragePrice.Value) * op.Amount.Value * pointValue;
+        }
+      }
+
+      return pnl;
     }
 
     /// <summary>

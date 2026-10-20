@@ -11,7 +11,7 @@ namespace Runner.Strategies.Supertrend
   /// Long-only: enter when direction flips -1 -> +1, exit when flips +1 -> -1.
   /// 1 lot. Bars built from tick mids (HLC from mid).
   /// </summary>
-  public sealed class SupertrendStrategy : IStrategy
+  public sealed class SupertrendStrategy : IStrategy, IForcedFlatAware
   {
     readonly StrategyContext _ctx;
 
@@ -31,6 +31,8 @@ namespace Runner.Strategies.Supertrend
     const string symName = "ES";
 
     public SupertrendStrategy(StrategyContext ctx) { _ctx = ctx; }
+
+    public void OnForcedFlat() { _pos = 0; }
 
     public async Task OnTickAsync(StrategyTick tick)
     {
@@ -74,8 +76,7 @@ namespace Runner.Strategies.Supertrend
       bool ok = dir != 0 && prevDir != 0;
       if (_pos == 0 && ok && prevDir == -1 && dir == 1)
       {
-        _pos = 1;
-        await _ctx.OpenPosition(symName, OrderSideEnum.Long, 1);
+        if (await _ctx.OpenPosition(symName, OrderSideEnum.Long, 1)) _pos = 1;
       }
       else if (_pos == 1 && ok && prevDir == 1 && dir == -1)
       {

@@ -13,7 +13,7 @@ namespace Runner.Strategies.LeadLag
   /// reacted) -> trade ES in NQ's direction. Exit: +3t TP, -3t SL, or 2s timeout.
   /// 3-hour test cutoff: requests shutdown after 3h of data.
   /// </summary>
-  public sealed class LeadLagStrategy : IStrategy
+  public sealed class LeadLagStrategy : IStrategy, IForcedFlatAware
   {
     readonly StrategyContext _ctx;
 
@@ -38,15 +38,15 @@ namespace Runner.Strategies.LeadLag
     int llPos = 0; // +1 long ES, -1 short ES, 0 flat
     double llEntryPx = 0;
     long llEntryT = 0;
-    long llFirstT = 0;
-    const long LlTestNs = 3L * 60 * 60 * 1000000000L; // 3-hour test window
 
     public LeadLagStrategy(StrategyContext ctx)
     {
       _ctx = ctx;
     }
 
-    public Task OnTickAsync(StrategyTick tick)
+    public void OnForcedFlat() { llPos = 0; }
+
+    public async Task OnTickAsync(StrategyTick tick)
     {
       var t = tick.TimeNs;
       var mid = tick.Mid;
@@ -116,11 +116,9 @@ namespace Runner.Strategies.LeadLag
           if (Math.Abs(nqMoveTicks) >= LlNqImpulseTicks && Math.Abs(esMoveTicks) < LlEsQuietTicks)
           {
             var dir = nqMoveTicks > 0 ? 1 : -1;
-            llPos = dir;
-            llEntryPx = esLast;
-            llEntryT = t;
             var side = dir > 0 ? OrderSideEnum.Long : OrderSideEnum.Short;
-            _ = _ctx.OpenPosition("ES", side, 1);
+            if (await _ctx.OpenPosition("ES", side, 1))
+            { llPos = dir; llEntryPx = esLast; llEntryT = t; }
           }
         }
 
@@ -137,14 +135,7 @@ namespace Runner.Strategies.LeadLag
         }
       }
 
-      // 3-hour test cutoff
-      if (llFirstT == 0) llFirstT = t;
-      if (t - llFirstT >= LlTestNs)
-      {
-        _ = Task.Run(() => _ctx.RequestShutdownAsync());
-      }
-
-      return Task.CompletedTask;
+      return;
     }
   }
 }
