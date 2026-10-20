@@ -174,7 +174,7 @@ namespace Runner
       // separate thread: StopApplication must not run on the grain callback thread.
       adapter.OnDomOrder = order =>
       {
-        if (endTime > 0 && order.Time >= endTime)
+        if (order is not null && endTime > 0 && order.Time >= endTime)
         {
           _ = Task.Run(() => FinalizeAsync());
         }
