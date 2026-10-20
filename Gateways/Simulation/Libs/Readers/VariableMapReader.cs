@@ -14,10 +14,10 @@ namespace Simulation.Readers
   ///
   /// Each blob deserializes directly into a Summary (no field mapping).
   /// Full-fidelity view: includes Dom/Order/Options where present.
-  /// For price-only history use FixedSummaryReader ({name}.ticks) instead.
+  /// For price-only history use MemoryMapReader ({name}.ticks) instead.
   /// The two readers are independent — neither calls the other.
   ///
-  /// Works like LiteSummaryReader (sequential MoveNext/Current) but backed
+  /// Works like LiteReader (sequential MoveNext/Current) but backed
   /// by a memory-mapped file instead of LiteDB.
   ///
   /// Use TickFileConverter to build .vars files from LiteDB (one-time).

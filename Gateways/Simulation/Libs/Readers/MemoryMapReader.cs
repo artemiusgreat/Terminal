@@ -9,7 +9,7 @@ namespace Simulation.Readers
   /// <summary>
   /// Memory-mapped ISummaryReader for fixed 56-byte tick records.
   ///
-  /// File: {name}.ticks — raw 52-byte records back-to-back, no header.
+  /// File: {name}.ticks — raw 56-byte records back-to-back, no header.
   /// Record count is derived from file size (length / 56).
   ///
   /// Fixed record (56 bytes):
@@ -17,7 +17,7 @@ namespace Simulation.Readers
   ///   Volume(8)
   ///
   /// Price-only view: no Dom/Order/Options. For full-fidelity history
-  /// use VariableSummaryReader ({name}.vars) instead. The two readers
+  /// use VariableMapReader ({name}.vars) instead. The two readers
   /// are independent — neither calls the other.
   ///
   /// Hot path is zero-copy: records are read directly from the mapped view

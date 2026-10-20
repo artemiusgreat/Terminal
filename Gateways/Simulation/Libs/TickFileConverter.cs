@@ -19,10 +19,10 @@ namespace Simulation.Tools
   ///
   /// Output (independent datasets, same tick sequence):
   ///   {instrument}.ticks — fixed 56-byte records back-to-back, no header.
-  ///                        Price-only view for FixedSummaryReader.
+  ///                        Price-only view for MemoryMapReader.
   ///   {instrument}.vars  — length-prefixed MessagePack blobs, no header:
   ///                        [length: int32][blob]... Full-fidelity view
-  ///                        for VariableSummaryReader.
+  ///                        for VariableMapReader.
   ///
   /// Usage: TickFileConverter &lt;dataDir&gt; &lt;instrument&gt;
   ///   e.g. TickFileConverter /data/FUTS ES
