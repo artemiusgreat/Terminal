@@ -181,8 +181,7 @@ namespace Simulation.Grains
 
         if (summaryInstrument is not null)
         {
-          var groupResponse = await instrumentGrain.Send(summaryInstrument with { Name = instrument.Name });
-          var group = groupResponse.Data;
+          var group = summaryInstrument with { Name = instrument.Name };
 
           await ordersGrain.Tap(group);
           await positionsGrain.Tap(group);
