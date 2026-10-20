@@ -6,7 +6,6 @@ using Core.Models;
 using Core.Services;
 using Estimator.Models;
 using Estimator.Services;
-using LiteDB;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -139,11 +138,15 @@ namespace Runner
       SpanHour = new() { TimeFrame = TimeSpan.FromHours(1) };
 
       // End of available tick history (timestamps are unix-ns): finalize when reached.
-      // Queried up-front; the sim opens the file afterwards.
-      using (var storage = new LiteDatabase(Path.Combine(((SimGateway)adapter).Source, "ES.db")))
+      // Read up-front from the last 56-byte record of the .ticks file
+      // (Time is the first field); the sim opens the file afterwards.
+      var ticksPath = Path.Combine(((SimGateway)adapter).Source, "ES.ticks");
+      using (var ticksFs = new FileStream(ticksPath, FileMode.Open, FileAccess.Read, FileShare.Read))
       {
-        endTime = storage.GetCollection<Summary>("prices").Query()
-          .OrderByDescending(o => o.Id).FirstOrDefault()?.Time ?? 0;
+        var buffer = new byte[8];
+        ticksFs.Seek(-56, SeekOrigin.End);
+        ticksFs.ReadExactly(buffer, 0, 8);
+        endTime = BitConverter.ToInt64(buffer, 0);
       }
 
       adapter.OnInstrument = async instrument =>
