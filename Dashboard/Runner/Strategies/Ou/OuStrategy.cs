@@ -49,6 +49,8 @@ namespace Runner.Strategies.Ou
 
     public async Task OnTickAsync(StrategyTick tick)
     {
+      if (tick.Symbol != symName) return;
+
       var t = tick.TimeNs;
       var mid = tick.Mid;
       var bid = tick.Bid;
