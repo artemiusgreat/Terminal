@@ -19,6 +19,12 @@ namespace Runner
     public Func<IGateway> GetAdapter { get; set; } =
       () => throw new InvalidOperationException("StrategyContext not initialized: Strategy.Setup() has not run.");
 
+    /// <summary>Bar timeframe (minutes) for bar-building strategies. Set by the pipeline in Setup().</summary>
+    public int BarMinutes { get; set; } = 1;
+
+    /// <summary>Bar length in nanoseconds (BarMinutes * 60e9).</summary>
+    public long BarNs => BarMinutes * 60000000000L;
+
     /// <summary>Tradable instruments by symbol. Set by the pipeline in Setup().</summary>
     public IReadOnlyDictionary<string, Instrument> Instruments { get; set; } =
       new Dictionary<string, Instrument>();

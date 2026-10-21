@@ -45,7 +45,7 @@ namespace Runner.Strategies.ConnorsPctB
       var mid = tick.Mid;
 
       // Build 1-min bars from tick mids
-      var cpbBarMin = t / 60000000000L;
+      var cpbBarMin = t / _ctx.BarNs;
       if (cpbBarMin != cpbLastBarMin)
       {
         if (cpbLastBarMin >= 0 && cpbBarN > 0)

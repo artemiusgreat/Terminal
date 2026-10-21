@@ -40,7 +40,7 @@ namespace Runner.Strategies.Supertrend
       var t = tick.TimeNs;
       var mid = tick.Mid;
 
-      long barMin = t / 60000000000L;
+      long barMin = t / _ctx.BarNs;
       if (barMin != _lastBarMin)
       {
         if (_lastBarMin >= 0 && _barN > 0)

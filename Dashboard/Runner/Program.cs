@@ -111,6 +111,9 @@ namespace Runner
     long endTime;
     int finalized;
 
+    // Bar timeframe (minutes) for bar-building strategies in this run.
+    const int BarMinutes = 1;
+
     // Non-RTH test mode: when true, entries are allowed only outside regular
     // trading hours (18:00-09:30 ET); any open position is force-flattened at
     // the RTH open. Topstep rules still apply on top.
@@ -188,6 +191,7 @@ namespace Runner
       };
 
       // Wire the strategy context now that the gateway exists.
+      context.BarMinutes = BarMinutes;
       context.GetAdapter = () => Adapter;
       context.Instruments = Instruments;
       context.RequestShutdownAsync = () =>
