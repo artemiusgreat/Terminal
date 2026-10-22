@@ -25,6 +25,13 @@ namespace Runner
     /// <summary>Bar length in nanoseconds (BarMinutes * 60e9).</summary>
     public long BarNs => BarMinutes * 60000000000L;
 
+    /// <summary>Unix-ns timestamp of the last tick in the data file (0 if unset).
+    /// Set by the pipeline in Setup(). Bar strategies use it to flatten at the
+    /// last completable bar: the host's end-of-stream ClosePosition cannot
+    /// fill (no price updates arrive after the final tick), so the residual
+    /// position would otherwise stay open and unrecorded.</summary>
+    public long DataEndNs { get; set; }
+
     /// <summary>Tradable instruments by symbol. Set by the pipeline in Setup().</summary>
     public IReadOnlyDictionary<string, Instrument> Instruments { get; set; } =
       new Dictionary<string, Instrument>();

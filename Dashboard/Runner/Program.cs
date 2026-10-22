@@ -24,6 +24,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Runner.Strategies.CarverFastMr;
 using Runner.Strategies.ConnorsPctB;
 using Runner.Strategies.KeltnerMr;
 using Runner.Strategies.LeadLag;
@@ -76,7 +77,7 @@ namespace Runner
       });
 
       builder.Services.AddSingleton<StrategyContext>();
-      builder.Services.AddSingleton<IStrategy, ConnorsPctBStrategy>();
+      builder.Services.AddSingleton<IStrategy, CarverFastMrStrategy>();
       builder.Services.AddSingleton<Strategy>();
       builder.Services.AddSingleton<StateService>();
       builder.Services.AddSingleton<SchedulerService>();
@@ -112,12 +113,16 @@ namespace Runner
     int finalized;
 
     // Bar timeframe (minutes) for bar-building strategies in this run.
-    const int BarMinutes = 1;
+    const int BarMinutes = 60;
 
     // Non-RTH test mode: when true, entries are allowed only outside regular
     // trading hours (18:00-09:30 ET); any open position is force-flattened at
     // the RTH open. Topstep rules still apply on top.
     const bool NonRthOnly = false;
+
+    // Screening runs: Topstep guard disabled entirely when false
+    // (no halt window, no daily stop, entries never blocked).
+    const bool TopstepEnabled = false;
 
     // --- Topstep guard + run window (host-level, applies to every strategy) ---
     long runEndNs;                 // window end (unix ns): first tick >= this ends the run
@@ -132,7 +137,7 @@ namespace Runner
     Dictionary<string, Instrument> Instruments = new()
     {
       ["ES"] = new() { Name = "ES", Leverage = 50, Commission = 1.0, StepSize = 0.25 },
-      ["NQ"] = new() { Name = "NQ", Leverage = 20, Commission = 1.0, StepSize = 0.25 },
+      //["NQ"] = new() { Name = "NQ", Leverage = 20, Commission = 1.0, StepSize = 0.25 },
     };
 
     public void Setup()
@@ -165,9 +170,10 @@ namespace Runner
         endTime = BitConverter.ToInt64(buffer, 0);
       }
 
-      // Run window: 3 ET days from the start of the data (Jul 1-3 sessions).
-      // Ends at Jul 4 2026 00:00 ET; first tick at/after it flattens + finalizes.
-      var runEndLocal = new DateTime(2026, 7, 4, 0, 0, 0, DateTimeKind.Unspecified);
+      // Run window: FULL data file. Cutoff Jul 18 2026 00:00 ET is past the
+      // last tick, so the clamp below sets runEndNs = endTime (end of stream
+      // flattens + finalizes).
+      var runEndLocal = new DateTime(2026, 7, 18, 0, 0, 0, DateTimeKind.Unspecified);
       var runEndUtc = TimeZoneInfo.ConvertTimeToUtc(runEndLocal, StrategyContext.EtZone);
       runEndNs = (runEndUtc.Ticks - DateTime.UnixEpoch.Ticks) * 100L;
       if (endTime > 0 && endTime < runEndNs) runEndNs = endTime;
@@ -192,6 +198,7 @@ namespace Runner
 
       // Wire the strategy context now that the gateway exists.
       context.BarMinutes = BarMinutes;
+      context.DataEndNs = endTime;
       context.GetAdapter = () => Adapter;
       context.Instruments = Instruments;
       context.RequestShutdownAsync = () =>
@@ -204,6 +211,15 @@ namespace Runner
     async Task FinalizeAsync()
     {
       if (Interlocked.Exchange(ref finalized, 1) != 0) return;
+
+      var openPos = await Adapter.GetPositions(new() { Source = true });
+      Console.WriteLine("OPENPOSITIONS " + JsonConvert.SerializeObject(openPos.Data.Select(p => new
+      {
+        Name = p.Operation.Instrument.Name,
+        p.Operation.Amount,
+        Side = p.Side?.ToString(),
+        p.Operation.AveragePrice
+      })));
 
       var metrics = await GetMetrics(Adapter);
 
@@ -245,8 +261,9 @@ namespace Runner
       }
 
       // Topstep evaluation once per minute of data (cheap; not per tick).
+      // Skipped entirely on screening runs (TopstepEnabled = false).
       var minute = t / 60000000000L;
-      if (minute != lastTopstepMinute)
+      if (TopstepEnabled && minute != lastTopstepMinute)
       {
         lastTopstepMinute = minute;
         await EvaluateTopstepAsync(t);
@@ -342,6 +359,7 @@ namespace Runner
         .Select(o => (object)new
         {
           Time = new DateTime(o.Operation.Time.Value),
+          Name = o.Operation.Instrument?.Name,
           Side = o.Side?.ToString(),
           Amount = o.Operation.Amount,
           EntryPrice = o.Operation.AveragePrice,
